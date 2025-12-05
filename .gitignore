@@ -1,6 +1,9 @@
 # Configuration file with sensitive credentials
 config.js
 
+# Vercel
+.vercel
+
 # OS files
 .DS_Store
 Thumbs.db

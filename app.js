@@ -1,5 +1,15 @@
 // Workout Tracker Application with Google Sheets Integration
-import { GOOGLE_CONFIG } from './config.js';
+// Try to import local config (for local development)
+let GOOGLE_CONFIG = null;
+(async () => {
+    try {
+        const configModule = await import('./config.js');
+        GOOGLE_CONFIG = configModule.GOOGLE_CONFIG;
+    } catch (e) {
+        // config.js not available (e.g., in production), will fetch from API
+        console.log('Local config not found, will use API endpoint');
+    }
+})();
 
 class WorkoutTracker {
     constructor() {
@@ -9,6 +19,7 @@ class WorkoutTracker {
         this.googleToken = null;
         this.sheetId = this.getSheetId();
         this.isSignedIn = false;
+        this.googleConfig = null; // Will be set from GOOGLE_CONFIG or API
         this.init();
     }
 
@@ -30,7 +41,7 @@ class WorkoutTracker {
         setTimeout(() => this.initGoogleAuth(), 100);
     }
 
-    initGoogleAuth() {
+    async initGoogleAuth() {
         // Check if Google API is loaded
         if (typeof google === 'undefined' || !google.accounts) {
             console.warn('Google Identity Services not loaded yet');
@@ -40,12 +51,12 @@ class WorkoutTracker {
         }
 
         // Check if credentials are configured
-        const clientId = this.getClientId();
+        const clientId = await this.getClientId();
         if (!clientId || clientId.includes('YOUR_CLIENT_ID')) {
             const buttonContainer = document.getElementById('google-signin-button');
             if (buttonContainer) {
                 buttonContainer.innerHTML = 
-                    '<p style="color: #999; font-size: 14px; padding: 10px;">⚠️ Please configure Google OAuth Client ID in app.js (see README.md for setup instructions)</p>';
+                    '<p style="color: #999; font-size: 14px; padding: 10px;">⚠️ Please configure Google OAuth Client ID (see README.md for setup instructions)</p>';
             }
             return;
         }
@@ -73,19 +84,52 @@ class WorkoutTracker {
         }
     }
 
-    getClientId() {
-        // Get from config.js (not committed to git)
-        return GOOGLE_CONFIG?.CLIENT_ID || null;
+    async loadConfig() {
+        // First try to use the imported local config (for development)
+        if (GOOGLE_CONFIG) {
+            this.googleConfig = GOOGLE_CONFIG;
+            return this.googleConfig;
+        }
+
+        // If we already loaded from API, use cached version
+        if (this.googleConfig) {
+            return this.googleConfig;
+        }
+
+        // Otherwise, fetch from serverless function (Vercel deployment)
+        try {
+            const response = await fetch('/api/config');
+            if (response.ok) {
+                this.googleConfig = await response.json();
+                return this.googleConfig;
+            }
+        } catch (error) {
+            console.error('Error loading config from API:', error);
+        }
+
+        return null;
     }
 
-    getApiKey() {
-        // Get from config.js (not committed to git)
-        return GOOGLE_CONFIG?.API_KEY || null;
+    async getClientId() {
+        // Load config (from local or API)
+        const config = await this.loadConfig();
+        return config?.CLIENT_ID || null;
     }
 
-    requestAccessToken() {
+    async getApiKey() {
+        // Load config (from local or API)
+        const config = await this.loadConfig();
+        return config?.API_KEY || null;
+    }
+
+    async requestAccessToken() {
         // Request OAuth2 token with proper scopes
-        const clientId = this.getClientId();
+        const clientId = await this.getClientId();
+        if (!clientId) {
+            alert('Google OAuth Client ID not configured. Please check your settings.');
+            return;
+        }
+
         const scopes = 'https://www.googleapis.com/auth/spreadsheets https://www.googleapis.com/auth/userinfo.email https://www.googleapis.com/auth/userinfo.profile';
         
         // Use Google Identity Services token client
@@ -152,8 +196,14 @@ class WorkoutTracker {
                 gapi.load('client', resolve);
             });
             
+            const apiKey = await this.getApiKey();
+            if (!apiKey) {
+                console.error('Google API Key not configured');
+                return;
+            }
+            
             await gapi.client.init({
-                apiKey: this.getApiKey(),
+                apiKey: apiKey,
                 discoveryDocs: ['https://sheets.googleapis.com/$discovery/rest?version=v4'],
             });
             
