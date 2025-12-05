@@ -1,4 +1,6 @@
 // Workout Tracker Application with Google Sheets Integration
+import { GOOGLE_CONFIG } from './config.js';
+
 class WorkoutTracker {
     constructor() {
         this.sessions = this.loadSessions();
@@ -72,15 +74,13 @@ class WorkoutTracker {
     }
 
     getClientId() {
-        // Replace this with your actual Google OAuth Client ID
-        // Get it from: Google Cloud Console > APIs & Services > Credentials > OAuth 2.0 Client ID
-        return '964380264058-m7j567ft35l5pqne7o5qngh24gf2k07e.apps.googleusercontent.com';
+        // Get from config.js (not committed to git)
+        return GOOGLE_CONFIG?.CLIENT_ID || null;
     }
 
     getApiKey() {
-        // Replace this with your actual Google API Key
-        // Get it from: Google Cloud Console > APIs & Services > Credentials > API Key
-        return 'AIzaSyA2XLn8HAIMp1bkuG81WF8E32Jf3ngnet4';
+        // Get from config.js (not committed to git)
+        return GOOGLE_CONFIG?.API_KEY || null;
     }
 
     requestAccessToken() {
