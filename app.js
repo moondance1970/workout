@@ -349,18 +349,20 @@ class WorkoutTracker {
                 } else if (matchingSheets.length === 1) {
                     // Found exactly one - use it automatically
                     userSheetId = matchingSheets[0].id;
+                    console.log('Auto-connecting to single sheet found:', userSheetId, 'Name:', matchingSheets[0].name);
                     this.saveSheetIdForUser(userEmail, userSheetId);
                     localStorage.setItem('sheetId', userSheetId);
                     
                     const sheetStatus = document.getElementById('sheet-status');
                     if (sheetStatus) {
-                        sheetStatus.innerHTML = `<p style="color: green;">✓ Automatically connected to '${defaultSheetName}'</p>`;
+                        sheetStatus.innerHTML = `<p style="color: green;">✓ Automatically connected to '${matchingSheets[0].name}'</p>`;
                     }
                     
                     // Complete the connection process
                     await this.completeSheetConnection(userSheetId);
                 } else {
-                    // Multiple matches - let user choose
+                    // Multiple matches - always let user choose to avoid connecting to wrong sheet
+                    console.log(`Found ${matchingSheets.length} sheets with name "${defaultSheetName}", showing selection dialog`);
                     await this.handleMultipleSheetMatches(matchingSheets, userEmail);
                     return; // handleMultipleSheetMatches will handle connection
                 }
@@ -567,6 +569,10 @@ class WorkoutTracker {
         document.getElementById('sign-out-btn').addEventListener('click', () => this.signOut());
         document.getElementById('sync-to-sheet-btn').addEventListener('click', () => this.syncToSheet());
         document.getElementById('sync-from-sheet-btn').addEventListener('click', () => this.syncFromSheet());
+        const reconnectBtn = document.getElementById('reconnect-sheet-btn');
+        if (reconnectBtn) {
+            reconnectBtn.addEventListener('click', () => this.reconnectToSheet());
+        }
         document.getElementById('export-btn').addEventListener('click', () => this.exportData());
         document.getElementById('import-file').addEventListener('change', (e) => this.importData(e));
         document.getElementById('clear-local-btn').addEventListener('click', () => this.clearLocalData());
@@ -1542,17 +1548,23 @@ class WorkoutTracker {
             
             const files = response.result.files || [];
             console.log(`Found ${files.length} sheet(s) with name "${sheetName}"`);
+            files.forEach((file, idx) => {
+                console.log(`  ${idx + 1}. "${file.name}" (ID: ${file.id}, Modified: ${file.modifiedTime})`);
+            });
             
-            return files.map(file => ({
+            const sheets = files.map(file => ({
                 id: file.id,
                 name: file.name,
                 modifiedTime: file.modifiedTime
             }));
+            
+            return sheets;
         } catch (error) {
             console.error('Error searching for sheet by name:', error);
             throw error;
         }
     }
+
 
     async handleMultipleSheetMatches(sheets, userEmail) {
         // Create a simple selection dialog
@@ -1607,12 +1619,14 @@ class WorkoutTracker {
             }
             
             // Test access by trying to read the sheet
-            await gapi.client.sheets.spreadsheets.get({
+            const sheetInfo = await gapi.client.sheets.spreadsheets.get({
                 spreadsheetId: sheetId
             });
+            const sheetName = sheetInfo.result.properties?.title || 'Unknown';
+            console.log('completeSheetConnection: Connected to sheet:', sheetName, 'ID:', sheetId);
             
             // Reload sessions from Google Sheets (source of truth)
-            console.log('Connecting: Loading sessions from sheet...');
+            console.log('Connecting: Loading sessions from sheet ID:', sheetId);
             const loadedSessions = await this.loadSessions();
             console.log('Connecting: Loaded sessions:', loadedSessions?.length || 0);
             this.sessions = loadedSessions || [];
@@ -1649,6 +1663,26 @@ class WorkoutTracker {
                 sheetStatus.innerHTML = '<p style="color: orange;">⚠ Connected but error loading data. Please try syncing manually.</p>';
             }
         }
+    }
+
+    async reconnectToSheet() {
+        if (!this.isSignedIn || !this.userEmail) {
+            alert('Please sign in first');
+            return;
+        }
+        
+        // Clear stored Sheet ID
+        this.saveSheetIdForUser(this.userEmail, null);
+        localStorage.removeItem('sheetId');
+        this.sheetId = null;
+        
+        const sheetStatus = document.getElementById('sheet-status');
+        if (sheetStatus) {
+            sheetStatus.innerHTML = '<p style="color: #666;">Searching for sheet...</p>';
+        }
+        
+        // Force a fresh search
+        await this.autoConnectSheet(this.userEmail);
     }
 
     // connectSheet() removed - sheets are now automatically discovered by name
@@ -1947,33 +1981,39 @@ class WorkoutTracker {
                 console.log('First 3 rows:', rows.slice(0, 3));
             } else {
                 // No error but no rows - sheet might be empty or tab name wrong
-                console.error('No rows found in sheet. Sheet ID:', this.sheetId, 'Tab:', sheetTabName);
+                console.log('No data rows found in sheet. This is normal for a new sheet.');
                 
-                // Try to verify the sheet exists and list available tabs
-                let availableTabs = [];
+                // Check if this is a new/empty sheet by checking if header row exists
+                let hasHeaders = false;
                 try {
                     if (gapi.client) {
                         gapi.client.setToken({ access_token: this.googleToken });
                     }
-                    const sheetInfo = await gapi.client.sheets.spreadsheets.get({
-                        spreadsheetId: this.sheetId
+                    const headerResponse = await gapi.client.sheets.spreadsheets.values.get({
+                        spreadsheetId: this.sheetId,
+                        range: `${escapedTabName}!A1:G1`
                     });
-                    availableTabs = sheetInfo.result.sheets?.map(s => s.properties.title) || [];
-                    console.log('Available tabs in sheet:', availableTabs);
+                    const headerRow = headerResponse.result.values?.[0];
+                    if (headerRow && headerRow.length > 0 && headerRow[0]?.toLowerCase() === 'date') {
+                        hasHeaders = true;
+                    }
                 } catch (e) {
-                    console.error('Could not get sheet info:', e);
+                    console.log('Could not check headers:', e);
                 }
                 
-                let errorMsg = 'No data found in the sheet.\n\n';
-                errorMsg += 'Please verify:\n';
-                errorMsg += '1. The sheet exists and is accessible\n';
-                errorMsg += '2. The sheet has data in the first tab\n';
-                errorMsg += '3. The data starts in column A\n';
-                if (availableTabs.length > 0) {
-                    errorMsg += `\nAvailable tabs: ${availableTabs.join(', ')}\n`;
-                    errorMsg += `Looking for tab: ${sheetTabName}`;
+                if (hasHeaders) {
+                    // Sheet has headers but no data - this is normal for a new sheet
+                    alert('Sheet connected successfully!\n\nThe sheet is empty (no workout data yet).\n\nStart logging workouts in the "Track Workout" tab and they will automatically sync to your sheet.');
+                } else {
+                    // Sheet might not be set up correctly
+                    let errorMsg = 'No data found in the sheet.\n\n';
+                    errorMsg += 'The sheet appears to be empty or not set up correctly.\n\n';
+                    errorMsg += 'If this is a new sheet, try logging a workout first - it will automatically create the headers and sync data.\n\n';
+                    errorMsg += 'If this is an existing sheet, please verify:\n';
+                    errorMsg += '1. The sheet has data in the first tab\n';
+                    errorMsg += '2. The data starts in column A with a "Date" header\n';
+                    alert(errorMsg);
                 }
-                alert(errorMsg);
                 this.updateSyncStatus();
                 return;
             }
