@@ -558,12 +558,25 @@ class WorkoutTracker {
                 return;
             }
             
-            // Only initialize if not already initialized
-            if (!gapi.client.drive) {
-                await gapi.client.init({
-                    apiKey: apiKey,
-                    discoveryDocs: ['https://www.googleapis.com/discovery/v1/apis/drive/v3/rest'],
-                });
+            // If Sheets API is already initialized, we can add Drive API to the same client
+            // Otherwise, initialize both together
+            if (gapi.client.sheets && !gapi.client.drive) {
+                // Sheets already initialized, add Drive API
+                await gapi.client.load('drive', 'v3');
+            } else if (!gapi.client.drive) {
+                // Initialize both APIs together if neither is initialized
+                if (!gapi.client.sheets) {
+                    await gapi.client.init({
+                        apiKey: apiKey,
+                        discoveryDocs: [
+                            'https://sheets.googleapis.com/$discovery/rest?version=v4',
+                            'https://www.googleapis.com/discovery/v1/apis/drive/v3/rest'
+                        ],
+                    });
+                } else {
+                    // Just add Drive API
+                    await gapi.client.load('drive', 'v3');
+                }
             }
             
             // Always set the token before making API calls (in case it changed or expired)
