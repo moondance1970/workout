@@ -198,6 +198,7 @@ class WorkoutTracker {
             },
         });
         
+        // Request token with consent to ensure we get all permissions
         tokenClient.requestAccessToken({ prompt: 'consent' });
     }
 
@@ -415,12 +416,21 @@ class WorkoutTracker {
     }
 
     async initGoogleSheets() {
-        if (!this.googleToken || !gapi) return;
+        if (!this.googleToken || !gapi) {
+            console.warn('Cannot init Google Sheets: token or gapi missing', {
+                hasToken: !!this.googleToken,
+                hasGapi: !!gapi
+            });
+            return;
+        }
         
         try {
-            await new Promise((resolve) => {
-                gapi.load('client', resolve);
-            });
+            // Load the client library if not already loaded
+            if (!gapi.client) {
+                await new Promise((resolve) => {
+                    gapi.load('client', resolve);
+                });
+            }
             
             const apiKey = await this.getApiKey();
             if (!apiKey) {
@@ -428,14 +438,21 @@ class WorkoutTracker {
                 return;
             }
             
-            await gapi.client.init({
-                apiKey: apiKey,
-                discoveryDocs: ['https://sheets.googleapis.com/$discovery/rest?version=v4'],
-            });
+            // Only initialize if not already initialized
+            if (!gapi.client.sheets) {
+                await gapi.client.init({
+                    apiKey: apiKey,
+                    discoveryDocs: ['https://sheets.googleapis.com/$discovery/rest?version=v4'],
+                });
+            }
             
+            // Always set the token before making API calls (in case it changed or expired)
+            // This is critical - the token must be set for every API call
             gapi.client.setToken({ access_token: this.googleToken });
+            console.log('Google Sheets API initialized with token');
         } catch (error) {
             console.error('Error initializing Google Sheets:', error);
+            throw error; // Re-throw so callers can handle it
         }
     }
 
@@ -1430,6 +1447,12 @@ class WorkoutTracker {
         // Get the first sheet tab name (or default to 'Sheet1')
         try {
             await this.initGoogleSheets();
+            
+            // Ensure token is set before making API call
+            if (!gapi.client || !gapi.client.getToken()) {
+                gapi.client.setToken({ access_token: this.googleToken });
+            }
+            
             const response = await gapi.client.sheets.spreadsheets.get({
                 spreadsheetId: this.sheetId
             });
@@ -1461,6 +1484,15 @@ class WorkoutTracker {
 
         try {
             await this.initGoogleSheets();
+            
+            // Always ensure token is set before API calls (mobile browsers sometimes lose it)
+            if (gapi.client) {
+                gapi.client.setToken({ access_token: this.googleToken });
+                console.log('Token set for API call');
+            } else {
+                console.error('gapi.client not available');
+                throw new Error('Google API client not initialized');
+            }
             
             // Get the actual sheet tab name
             const sheetTabName = await this.getSheetTabName();
@@ -1535,11 +1567,28 @@ class WorkoutTracker {
         document.getElementById('sync-status').innerHTML = '<span id="sync-indicator">🔄</span><span id="sync-text">Syncing...</span>';
 
         try {
+            // Ensure token is still valid
+            const tokenExpiry = localStorage.getItem('googleTokenExpiry');
+            if (tokenExpiry && new Date() >= new Date(tokenExpiry)) {
+                console.log('Token expired, need to re-authenticate');
+                alert('Your session has expired. Please sign out and sign in again to refresh your permissions.');
+                return;
+            }
+            
             await this.initGoogleSheets();
+            
+            // Verify we have a valid token set
+            if (!this.googleToken) {
+                console.error('No Google token available');
+                alert('Authentication error. Please sign out and sign in again.');
+                return;
+            }
             
             // Get the actual sheet tab name
             const sheetTabName = await this.getSheetTabName();
             const escapedTabName = this.escapeSheetTabName(sheetTabName);
+            
+            console.log('Attempting to read from sheet:', this.sheetId, 'range:', `${escapedTabName}!A2:G10000`);
             
             const response = await gapi.client.sheets.spreadsheets.values.get({
                 spreadsheetId: this.sheetId,
@@ -1613,15 +1662,50 @@ class WorkoutTracker {
                 errorMessage = String(error);
             }
             
-            // Check for common errors
+            // Check for common errors and provide helpful guidance
             if (errorMessage.includes('403') || errorMessage.includes('permission')) {
-                errorMessage = 'Permission denied. Make sure you have edit access to the Google Sheet.';
+                const shouldRetry = confirm(
+                    'Permission denied. This usually means:\n\n' +
+                    '• Your session expired\n' +
+                    '• The sheet needs to be shared with your Google account\n\n' +
+                    'Would you like to sign out and sign in again to refresh permissions?\n\n' +
+                    'Click OK to sign out, or Cancel to try manually.'
+                );
+                
+                if (shouldRetry) {
+                    // Sign out and prompt to sign in again
+                    this.signOut();
+                    setTimeout(() => {
+                        alert('Please sign in again to refresh your permissions.');
+                        this.requestAccessToken();
+                    }, 500);
+                    return;
+                } else {
+                    errorMessage = 'Permission denied. Please:\n\n' +
+                        '1. Sign out and sign in again\n' +
+                        '2. Make sure the Google Sheet is shared with your account\n' +
+                        '3. Try connecting to the sheet again';
+                }
             } else if (errorMessage.includes('404') || errorMessage.includes('not found')) {
                 errorMessage = 'Sheet not found. Please check that the Sheet ID is correct.';
             } else if (errorMessage.includes('401') || errorMessage.includes('unauthorized')) {
-                errorMessage = 'Authentication failed. Please sign in again.';
+                const shouldRetry = confirm(
+                    'Authentication failed. Your session may have expired.\n\n' +
+                    'Would you like to sign out and sign in again?'
+                );
+                
+                if (shouldRetry) {
+                    this.signOut();
+                    setTimeout(() => {
+                        this.requestAccessToken();
+                    }, 500);
+                    return;
+                } else {
+                    errorMessage = 'Authentication failed. Please sign out and sign in again.';
+                }
             }
             
+            console.error('Full sync error details:', error);
             alert('Error syncing from Google Sheets: ' + errorMessage);
             this.updateSyncStatus();
         }
