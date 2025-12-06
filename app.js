@@ -1469,9 +1469,14 @@ class WorkoutTracker {
         try {
             await this.initGoogleSheets();
             
-            // Ensure token is set before making API call
-            if (!gapi.client || !gapi.client.getToken()) {
+            // CRITICAL: Ensure token is set before making API call
+            // This is especially important on mobile browsers
+            if (gapi.client) {
                 gapi.client.setToken({ access_token: this.googleToken });
+                console.log('Token explicitly set for getSheetTabName API call');
+            } else {
+                console.error('gapi.client not available in getSheetTabName');
+                return 'Sheet1'; // Fallback to default
             }
             
             const response = await gapi.client.sheets.spreadsheets.get({
@@ -1485,6 +1490,9 @@ class WorkoutTracker {
             }
         } catch (error) {
             console.warn('Could not get sheet tab name, using default:', error);
+            if (error.result?.error) {
+                console.error('API Error details:', error.result.error);
+            }
         }
         console.log('Using default sheet tab name: Sheet1');
         return 'Sheet1'; // Default fallback
@@ -1625,22 +1633,39 @@ class WorkoutTracker {
             
             console.log('Attempting to read from sheet:', this.sheetId, 'range:', `${escapedTabName}!A2:G10000`);
             
-            const response = await gapi.client.sheets.spreadsheets.values.get({
-                spreadsheetId: this.sheetId,
-                range: `${escapedTabName}!A2:G10000`
-            });
-
-            console.log('API Response:', response);
-            console.log('Response result:', response.result);
-            console.log('Response values:', response.result?.values);
+            let response;
+            let rows = [];
+            let apiError = null;
             
-            let rows = response.result?.values || [];
-            console.log('Rows received from API (A2:G10000):', rows.length);
+            try {
+                response = await gapi.client.sheets.spreadsheets.values.get({
+                    spreadsheetId: this.sheetId,
+                    range: `${escapedTabName}!A2:G10000`
+                });
+
+                console.log('API Response:', response);
+                console.log('Response result:', response.result);
+                console.log('Response values:', response.result?.values);
+                
+                rows = response.result?.values || [];
+                console.log('Rows received from API (A2:G10000):', rows.length);
+            } catch (error) {
+                apiError = error;
+                console.error('Error reading from A2:', error);
+                // Try to get more info about the error
+                if (error.result?.error) {
+                    console.error('API Error details:', error.result.error);
+                }
+            }
             
             // If no rows from A2, try reading from A1 (maybe data starts at row 1)
-            if (rows.length === 0) {
+            if (rows.length === 0 && !apiError) {
                 console.warn('No rows from A2, trying A1...');
                 try {
+                    // Ensure token is still set
+                    if (gapi.client) {
+                        gapi.client.setToken({ access_token: this.googleToken });
+                    }
                     const testResponse = await gapi.client.sheets.spreadsheets.values.get({
                         spreadsheetId: this.sheetId,
                         range: `${escapedTabName}!A1:G10000`
@@ -1657,7 +1682,37 @@ class WorkoutTracker {
                     }
                 } catch (e) {
                     console.error('Error reading from A1:', e);
+                    if (!apiError) apiError = e;
                 }
+            }
+            
+            // If we got an API error, try to provide helpful feedback
+            if (apiError && rows.length === 0) {
+                let errorMsg = 'Error reading from Google Sheet.\n\n';
+                if (apiError.result?.error) {
+                    const apiErr = apiError.result.error;
+                    if (apiErr.code === 404 || apiErr.message?.includes('not found')) {
+                        errorMsg += 'Sheet not found. Please check:\n';
+                        errorMsg += '• The Sheet ID is correct\n';
+                        errorMsg += '• The sheet exists and is accessible\n';
+                    } else if (apiErr.code === 403 || apiErr.message?.includes('permission')) {
+                        errorMsg += 'Permission denied. Please:\n';
+                        errorMsg += '• Make sure the sheet is shared with your Google account\n';
+                        errorMsg += '• Sign out and sign in again to refresh permissions\n';
+                    } else {
+                        errorMsg += `Error: ${apiErr.message || JSON.stringify(apiErr)}\n\n`;
+                        errorMsg += 'Please check:\n';
+                        errorMsg += '• The Sheet ID is correct\n';
+                        errorMsg += '• You have access to the sheet\n';
+                        errorMsg += '• The sheet tab name is correct\n';
+                    }
+                } else {
+                    errorMsg += `Error: ${apiError.message || String(apiError)}\n\n`;
+                    errorMsg += 'Please verify the Sheet ID and try again.';
+                }
+                alert(errorMsg);
+                this.updateSyncStatus();
+                return;
             }
             
             if (rows.length > 0) {
@@ -1665,8 +1720,35 @@ class WorkoutTracker {
                 console.log('First row:', rows[0]);
                 console.log('First 3 rows:', rows.slice(0, 3));
             } else {
+                // No error but no rows - sheet might be empty or tab name wrong
                 console.error('No rows found in sheet. Sheet ID:', this.sheetId, 'Tab:', sheetTabName);
-                alert('No data found in the sheet. Please verify:\n\n1. The Sheet ID is correct\n2. The sheet has data in the first tab\n3. The data starts in column A');
+                
+                // Try to verify the sheet exists and list available tabs
+                let availableTabs = [];
+                try {
+                    if (gapi.client) {
+                        gapi.client.setToken({ access_token: this.googleToken });
+                    }
+                    const sheetInfo = await gapi.client.sheets.spreadsheets.get({
+                        spreadsheetId: this.sheetId
+                    });
+                    availableTabs = sheetInfo.result.sheets?.map(s => s.properties.title) || [];
+                    console.log('Available tabs in sheet:', availableTabs);
+                } catch (e) {
+                    console.error('Could not get sheet info:', e);
+                }
+                
+                let errorMsg = 'No data found in the sheet.\n\n';
+                errorMsg += 'Please verify:\n';
+                errorMsg += '1. The Sheet ID is correct\n';
+                errorMsg += '2. The sheet has data in the first tab\n';
+                errorMsg += '3. The data starts in column A\n';
+                if (availableTabs.length > 0) {
+                    errorMsg += `\nAvailable tabs: ${availableTabs.join(', ')}\n`;
+                    errorMsg += `Looking for tab: ${sheetTabName}`;
+                }
+                alert(errorMsg);
+                this.updateSyncStatus();
                 return;
             }
             
