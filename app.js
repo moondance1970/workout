@@ -76,20 +76,27 @@ class WorkoutTracker {
         if (token && tokenExpiry && new Date() < new Date(tokenExpiry)) {
             this.googleToken = token;
             this.isSignedIn = true;
-            // Load user info (which will auto-connect to sheet, create if needed, and sync)
+            // Load user info (which will auto-connect to sheet, create if needed, sync, and render)
+            // This already handles loading sessions, exercises, and rendering
             await this.loadUserInfo();
             this.initGoogleSheets();
             this.updateSyncStatus();
             
-            // Reload sessions from Google Sheets (source of truth)
-            this.sessions = await this.loadSessions();
-            this.currentSession = this.getTodaySession();
-            this.renderTodayWorkout();
-            this.renderHistory();
+            // Ensure UI is up to date (loadUserInfo/autoConnectSheet should have already done this)
+            // But do a final check to make sure data is loaded
+            if (!this.sessions || this.sessions.length === 0) {
+                console.log('No sessions after autoConnect, attempting to load...');
+                this.sessions = await this.loadSessions();
+                this.currentSession = this.getTodaySession();
+                this.renderTodayWorkout();
+                this.renderHistory();
+            }
             
-            // Reload exercise list from Google Sheets if available
-            this.exerciseList = await this.loadExerciseList();
-            this.updateExerciseList();
+            if (!this.exerciseList || this.exerciseList.length === 0) {
+                console.log('No exercises after autoConnect, attempting to load...');
+                this.exerciseList = await this.loadExerciseList();
+                this.updateExerciseList();
+            }
         }
 
         // Create sign-in button
@@ -283,25 +290,39 @@ class WorkoutTracker {
                 });
                 
                 // Reload sessions from Google Sheets (source of truth)
-                this.sessions = await this.loadSessions();
+                console.log('Auto-connecting: Loading sessions from sheet...');
+                const loadedSessions = await this.loadSessions();
+                console.log('Auto-connecting: Loaded sessions:', loadedSessions?.length || 0);
+                this.sessions = loadedSessions || [];
                 this.currentSession = this.getTodaySession();
+                
+                // Force re-render to ensure UI updates
                 this.renderTodayWorkout();
                 this.renderHistory(); // Refresh history display
+                console.log('Auto-connecting: Rendered history with', this.sessions.length, 'sessions');
                 
                 // Reload exercise list from Google Sheets now that we're connected
                 const sheetExercises = await this.loadExerciseListFromSheet();
                 if (sheetExercises && sheetExercises.length > 0) {
+                    console.log('Auto-connecting: Loaded', sheetExercises.length, 'exercises from sheet');
                     this.exerciseList = sheetExercises;
                     this.saveExerciseList(); // Save to localStorage as backup
                     this.updateExerciseList();
                 } else {
                     // If no exercises in sheet, try loading from localStorage or sessions
+                    console.log('Auto-connecting: No exercises in sheet, loading from fallback...');
                     this.exerciseList = await this.loadExerciseList();
                     this.updateExerciseList();
                 }
                 
                 // Immediately sync to sheet after login (uploads local data if any)
                 await this.syncToSheet(true); // Silent sync
+                
+                // After sync, reload to get the latest data
+                this.sessions = await this.loadSessions();
+                this.currentSession = this.getTodaySession();
+                this.renderTodayWorkout();
+                this.renderHistory();
             } catch (error) {
                 console.warn('Sheet might not be accessible:', error);
                 if (sheetStatus) {
@@ -502,15 +523,32 @@ class WorkoutTracker {
                 
                 if (tab === 'history') {
                     // Reload from Google Sheets when history tab is opened (to ensure latest data)
-                    if (this.isSignedIn && this.sheetId) {
-                        this.loadSessions().then(sessions => {
-                            this.sessions = sessions;
-                            this.currentSession = this.getTodaySession();
+                    (async () => {
+                        if (this.isSignedIn && this.sheetId) {
+                            try {
+                                console.log('Reloading sessions for history tab...');
+                                const sessions = await this.loadSessions();
+                                console.log('Sessions loaded:', sessions?.length || 0);
+                                this.sessions = sessions || [];
+                                this.currentSession = this.getTodaySession();
+                                
+                                // Also reload exercise list to ensure it's up to date
+                                const exercises = await this.loadExerciseList();
+                                if (exercises && exercises.length > 0) {
+                                    this.exerciseList = exercises;
+                                    this.updateExerciseList();
+                                }
+                                
+                                this.renderHistory();
+                            } catch (error) {
+                                console.error('Error reloading sessions for history tab:', error);
+                                // Still render with whatever we have
+                                this.renderHistory();
+                            }
+                        } else {
                             this.renderHistory();
-                        });
-                    } else {
-                        this.renderHistory();
-                    }
+                        }
+                    })();
                 }
             });
         });
@@ -1042,11 +1080,23 @@ class WorkoutTracker {
 
     renderHistoryList() {
         const container = document.getElementById('history-content');
-        const timeFilter = document.getElementById('time-filter').value;
+        if (!container) {
+            console.error('History content container not found');
+            return;
+        }
+        
+        const timeFilter = document.getElementById('time-filter')?.value || 'all';
         
         // Debug: log sessions to see what we have
         console.log('Rendering history with sessions:', this.sessions);
-        console.log('Number of sessions:', this.sessions.length);
+        console.log('Number of sessions:', this.sessions?.length || 0);
+        console.log('Is signed in:', this.isSignedIn, 'Sheet ID:', this.sheetId);
+        
+        // Ensure sessions is an array
+        if (!Array.isArray(this.sessions)) {
+            console.warn('Sessions is not an array, resetting to empty array');
+            this.sessions = [];
+        }
         
         let filteredSessions = [...this.sessions].sort((a, b) => new Date(b.date) - new Date(a.date));
         
@@ -1058,7 +1108,14 @@ class WorkoutTracker {
         }
 
         if (filteredSessions.length === 0) {
-            container.innerHTML = '<p class="no-data">No workout history found</p>';
+            // Show helpful message based on connection status
+            let message = 'No workout history found';
+            if (this.isSignedIn && this.sheetId) {
+                message += '<br><small style="color: #666;">Try clicking "Sync from Sheet" in Settings to load your data.</small>';
+            } else if (this.isSignedIn) {
+                message += '<br><small style="color: #666;">Please connect to a Google Sheet in Settings.</small>';
+            }
+            container.innerHTML = `<p class="no-data">${message}</p>`;
             return;
         }
 
@@ -1150,43 +1207,78 @@ class WorkoutTracker {
         }
     }
 
+    async getExercisesTabName() {
+        // Get the Exercises sheet tab name (or create it if it doesn't exist)
+        try {
+            await this.initGoogleSheets();
+            const response = await gapi.client.sheets.spreadsheets.get({
+                spreadsheetId: this.sheetId
+            });
+            const sheets = response.result.sheets || [];
+            // Look for Exercises tab
+            const exercisesSheet = sheets.find(s => s.properties.title === 'Exercises');
+            if (exercisesSheet) {
+                return 'Exercises';
+            }
+            // If not found, try to create it or use first available tab
+            if (sheets.length > 1) {
+                // Use second tab if it exists
+                return sheets[1].properties.title;
+            }
+        } catch (error) {
+            console.warn('Could not get Exercises tab name:', error);
+        }
+        return 'Exercises'; // Default fallback
+    }
+
     async syncExerciseListToSheet() {
         if (!this.isSignedIn || !this.sheetId) return;
 
         try {
             await this.initGoogleSheets();
             
-            // Check if Exercises sheet exists, create if not
+            // Get or create Exercises tab
+            let exercisesTabName = await this.getExercisesTabName();
+            
+            // Try to write to Exercises tab, create if it doesn't exist
             try {
-                await gapi.client.sheets.spreadsheets.get({
-                    spreadsheetId: this.sheetId
+                const rows = [['Exercise Name']]; // Header
+                this.exerciseList.forEach(exercise => {
+                    rows.push([exercise]);
                 });
-            } catch (e) {
-                // Sheet might not exist, we'll handle it
+
+                const escapedTabName = this.escapeSheetTabName(exercisesTabName);
+                const range = `${escapedTabName}!A1`;
+                await gapi.client.sheets.spreadsheets.values.update({
+                    spreadsheetId: this.sheetId,
+                    range: range,
+                    valueInputOption: 'RAW',
+                    resource: { values: rows }
+                });
+            } catch (error) {
+                // If Exercises tab doesn't exist, create it
+                if (error.message && error.message.includes('Unable to parse range')) {
+                    await this.createExercisesSheet();
+                    exercisesTabName = 'Exercises';
+                    // Retry
+                    const rows = [['Exercise Name']];
+                    this.exerciseList.forEach(exercise => {
+                        rows.push([exercise]);
+                    });
+                    const escapedTabName = this.escapeSheetTabName('Exercises');
+                    await gapi.client.sheets.spreadsheets.values.update({
+                        spreadsheetId: this.sheetId,
+                        range: `${escapedTabName}!A1`,
+                        valueInputOption: 'RAW',
+                        resource: { values: rows }
+                    });
+                } else {
+                    throw error;
+                }
             }
-
-            // Write exercise list to "Exercises" sheet
-            const rows = [['Exercise Name']]; // Header
-            this.exerciseList.forEach(exercise => {
-                rows.push([exercise]);
-            });
-
-            const range = 'Exercises!A1';
-            await gapi.client.sheets.spreadsheets.values.update({
-                spreadsheetId: this.sheetId,
-                range: range,
-                valueInputOption: 'RAW',
-                resource: { values: rows }
-            });
         } catch (error) {
-            // If Exercises sheet doesn't exist, create it
-            if (error.status === 400 || error.message?.includes('range')) {
-                await this.createExercisesSheet();
-                // Retry after creating sheet
-                await this.syncExerciseListToSheet();
-            } else {
-                throw error;
-            }
+            console.error('Error syncing exercise list to sheet:', error);
+            // Don't throw - exercise list sync failure shouldn't break the main sync
         }
     }
 
@@ -1220,17 +1312,28 @@ class WorkoutTracker {
         try {
             await this.initGoogleSheets();
             
+            // Get Exercises tab name (or try default)
+            let exercisesTabName = 'Exercises';
+            try {
+                exercisesTabName = await this.getExercisesTabName();
+            } catch (e) {
+                // Use default, tab might not exist yet
+            }
+            
+            const escapedTabName = this.escapeSheetTabName(exercisesTabName);
             const response = await gapi.client.sheets.spreadsheets.values.get({
                 spreadsheetId: this.sheetId,
-                range: 'Exercises!A2:A1000' // Skip header row
+                range: `${escapedTabName}!A2:A1000` // Skip header row
             });
 
             const rows = response.result.values || [];
+            console.log('Exercise rows loaded from sheet:', rows.length);
             if (rows.length > 0) {
                 const exercises = rows
                     .map(row => row[0]?.trim())
                     .filter(name => name && name.length > 0)
                     .sort();
+                console.log('Exercises loaded from sheet:', exercises.length, exercises.slice(0, 5));
                 return exercises;
             }
         } catch (error) {
@@ -1315,6 +1418,34 @@ class WorkoutTracker {
         localStorage.setItem('userSheetIds', JSON.stringify(userSheetIds));
     }
 
+    escapeSheetTabName(tabName) {
+        // If tab name contains spaces or special characters, wrap in single quotes
+        if (tabName.includes(' ') || tabName.includes('-') || tabName.includes('!') || tabName.includes("'")) {
+            return `'${tabName.replace(/'/g, "''")}'`; // Escape single quotes by doubling them
+        }
+        return tabName;
+    }
+
+    async getSheetTabName() {
+        // Get the first sheet tab name (or default to 'Sheet1')
+        try {
+            await this.initGoogleSheets();
+            const response = await gapi.client.sheets.spreadsheets.get({
+                spreadsheetId: this.sheetId
+            });
+            const sheets = response.result.sheets || [];
+            if (sheets.length > 0) {
+                const tabName = sheets[0].properties.title;
+                console.log('Using sheet tab name:', tabName);
+                return tabName;
+            }
+        } catch (error) {
+            console.warn('Could not get sheet tab name, using default:', error);
+        }
+        console.log('Using default sheet tab name: Sheet1');
+        return 'Sheet1'; // Default fallback
+    }
+
     async syncToSheet(silent = false) {
         if (!this.isSignedIn || !this.sheetId) {
             if (!silent) alert('Please sign in and connect a Google Sheet first');
@@ -1330,6 +1461,10 @@ class WorkoutTracker {
 
         try {
             await this.initGoogleSheets();
+            
+            // Get the actual sheet tab name
+            const sheetTabName = await this.getSheetTabName();
+            const escapedTabName = this.escapeSheetTabName(sheetTabName);
             
             // Convert sessions to sheet format
             const rows = [['Date', 'Exercise', 'Weight', 'Sets', 'Reps', 'Difficulty', 'Notes']];
@@ -1350,7 +1485,7 @@ class WorkoutTracker {
                 }
             });
 
-            const range = 'Sheet1!A1';
+            const range = `${escapedTabName}!A1`;
             const response = await gapi.client.sheets.spreadsheets.values.update({
                 spreadsheetId: this.sheetId,
                 range: range,
@@ -1402,24 +1537,45 @@ class WorkoutTracker {
         try {
             await this.initGoogleSheets();
             
+            // Get the actual sheet tab name
+            const sheetTabName = await this.getSheetTabName();
+            const escapedTabName = this.escapeSheetTabName(sheetTabName);
+            
             const response = await gapi.client.sheets.spreadsheets.values.get({
                 spreadsheetId: this.sheetId,
-                range: 'Sheet1!A2:G1000'
+                range: `${escapedTabName}!A2:G10000`
             });
 
             const rows = response.result.values || [];
             const newSessions = {};
 
-            rows.forEach(row => {
+            rows.forEach((row, index) => {
+                // Skip empty rows
+                if (!row || row.length === 0) {
+                    return;
+                }
+                
+                // Skip header row if it somehow got included
+                if (index === 0 && row[0] && row[0].toLowerCase() === 'date') {
+                    return;
+                }
+                
                 if (row.length >= 6) {
-                    const date = row[0];
+                    const date = row[0]?.trim();
+                    const exerciseName = row[1]?.trim();
+                    
+                    // Skip rows with empty date or exercise name
+                    if (!date || !exerciseName) {
+                        return;
+                    }
+                    
                     const exercise = {
-                        name: row[1],
+                        name: exerciseName,
                         weight: parseFloat(row[2]) || 0,
                         sets: parseInt(row[3]) || 1,
-                        reps: row[4] ? row[4].split('+').map(r => parseInt(r) || 0) : [0],
-                        difficulty: this.parseDifficulty(row[5]),
-                        notes: row[6] || '',
+                        reps: row[4] ? row[4].toString().split('+').map(r => parseInt(r.trim()) || 0).filter(r => r > 0) : [0],
+                        difficulty: this.parseDifficulty(row[5] || 'medium'),
+                        notes: (row[6] || '').trim(),
                         timestamp: new Date().toISOString()
                     };
 
@@ -1580,9 +1736,13 @@ class WorkoutTracker {
             await this.initGoogleSheets();
             
             console.log('Loading sessions from sheet:', this.sheetId);
+            // Get the actual sheet tab name
+            const sheetTabName = await this.getSheetTabName();
+            const escapedTabName = this.escapeSheetTabName(sheetTabName);
+            
             const response = await gapi.client.sheets.spreadsheets.values.get({
                 spreadsheetId: this.sheetId,
-                range: 'Sheet1!A2:G10000' // Increased range for more data
+                range: `${escapedTabName}!A2:G10000` // Increased range for more data
             });
 
             const rows = response.result.values || [];
@@ -1596,15 +1756,32 @@ class WorkoutTracker {
                     console.log(`Row ${index}:`, row);
                 }
                 
+                // Skip empty rows
+                if (!row || row.length === 0) {
+                    return;
+                }
+                
+                // Skip header row if it somehow got included
+                if (index === 0 && row[0] && row[0].toLowerCase() === 'date') {
+                    return;
+                }
+                
                 if (row.length >= 6) {
-                    const date = row[0];
+                    const date = row[0]?.trim();
+                    const exerciseName = row[1]?.trim();
+                    
+                    // Skip rows with empty date or exercise name
+                    if (!date || !exerciseName) {
+                        return;
+                    }
+                    
                     const exercise = {
-                        name: row[1],
+                        name: exerciseName,
                         weight: parseFloat(row[2]) || 0,
                         sets: parseInt(row[3]) || 1,
-                        reps: row[4] ? row[4].split('+').map(r => parseInt(r) || 0) : [0],
-                        difficulty: this.parseDifficulty(row[5]),
-                        notes: row[6] || '',
+                        reps: row[4] ? row[4].toString().split('+').map(r => parseInt(r.trim()) || 0).filter(r => r > 0) : [0],
+                        difficulty: this.parseDifficulty(row[5] || 'medium'),
+                        notes: (row[6] || '').trim(),
                         timestamp: new Date().toISOString()
                     };
 
@@ -1619,6 +1796,9 @@ class WorkoutTracker {
 
             const sessionArray = Object.values(sessions);
             console.log('Sessions loaded from sheet:', sessionArray.length);
+            if (sessionArray.length > 0) {
+                console.log('Sample session:', sessionArray[0]);
+            }
             return sessionArray;
         } catch (error) {
             console.error('Error loading sessions from sheet:', error);
