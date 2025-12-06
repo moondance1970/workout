@@ -1329,6 +1329,16 @@ class WorkoutTracker {
         try {
             await this.initGoogleSheets();
             
+            // CRITICAL: Ensure token is set on gapi.client before making API calls
+            // This is especially important on mobile browsers
+            if (gapi.client) {
+                gapi.client.setToken({ access_token: this.googleToken });
+                console.log('Token explicitly set for loadExerciseListFromSheet API call');
+            } else {
+                console.error('gapi.client not available in loadExerciseListFromSheet');
+                return null;
+            }
+            
             // Get Exercises tab name (or try default)
             let exercisesTabName = 'Exercises';
             try {
@@ -1595,9 +1605,23 @@ class WorkoutTracker {
                 return;
             }
             
+            // CRITICAL: Ensure token is set on gapi.client before making API calls
+            // This is especially important on mobile browsers
+            if (gapi.client) {
+                gapi.client.setToken({ access_token: this.googleToken });
+                console.log('Token explicitly set for syncFromSheet API call');
+            } else {
+                console.error('gapi.client not available');
+                alert('Google API not initialized. Please refresh the page and try again.');
+                return;
+            }
+            
             // Get the actual sheet tab name
+            console.log('Getting sheet tab name for sheet:', this.sheetId);
             const sheetTabName = await this.getSheetTabName();
+            console.log('Detected sheet tab name:', sheetTabName);
             const escapedTabName = this.escapeSheetTabName(sheetTabName);
+            console.log('Escaped tab name:', escapedTabName);
             
             console.log('Attempting to read from sheet:', this.sheetId, 'range:', `${escapedTabName}!A2:G10000`);
             
@@ -1606,7 +1630,46 @@ class WorkoutTracker {
                 range: `${escapedTabName}!A2:G10000`
             });
 
-            const rows = response.result.values || [];
+            console.log('API Response:', response);
+            console.log('Response result:', response.result);
+            console.log('Response values:', response.result?.values);
+            
+            let rows = response.result?.values || [];
+            console.log('Rows received from API (A2:G10000):', rows.length);
+            
+            // If no rows from A2, try reading from A1 (maybe data starts at row 1)
+            if (rows.length === 0) {
+                console.warn('No rows from A2, trying A1...');
+                try {
+                    const testResponse = await gapi.client.sheets.spreadsheets.values.get({
+                        spreadsheetId: this.sheetId,
+                        range: `${escapedTabName}!A1:G10000`
+                    });
+                    rows = testResponse.result?.values || [];
+                    console.log('Rows from A1:', rows.length);
+                    if (rows.length > 0) {
+                        console.log('First row from A1:', rows[0]);
+                        // Skip the header row if it exists
+                        if (rows[0] && rows[0][0] && rows[0][0].toLowerCase() === 'date') {
+                            console.log('Skipping header row');
+                            rows = rows.slice(1);
+                        }
+                    }
+                } catch (e) {
+                    console.error('Error reading from A1:', e);
+                }
+            }
+            
+            if (rows.length > 0) {
+                console.log('Processing', rows.length, 'rows');
+                console.log('First row:', rows[0]);
+                console.log('First 3 rows:', rows.slice(0, 3));
+            } else {
+                console.error('No rows found in sheet. Sheet ID:', this.sheetId, 'Tab:', sheetTabName);
+                alert('No data found in the sheet. Please verify:\n\n1. The Sheet ID is correct\n2. The sheet has data in the first tab\n3. The data starts in column A');
+                return;
+            }
+            
             const newSessions = {};
 
             rows.forEach((row, index) => {
@@ -1650,8 +1713,28 @@ class WorkoutTracker {
             const sessionArray = Object.values(newSessions);
             console.log('Sync from sheet: Parsed', sessionArray.length, 'sessions from', rows.length, 'rows');
             
+            // Check if we got rows but couldn't parse any sessions
             if (sessionArray.length === 0 && rows.length > 0) {
                 console.warn('No sessions created from rows. First few rows:', rows.slice(0, 3));
+                // Analyze why parsing failed
+                const sampleRow = rows[0];
+                let errorDetails = 'Data found in sheet but could not be parsed.\n\n';
+                errorDetails += `Found ${rows.length} row(s) but 0 sessions created.\n\n`;
+                errorDetails += 'Expected format:\n';
+                errorDetails += 'Column A: Date (YYYY-MM-DD)\n';
+                errorDetails += 'Column B: Exercise Name\n';
+                errorDetails += 'Column C: Weight\n';
+                errorDetails += 'Column D: Sets\n';
+                errorDetails += 'Column E: Reps (e.g., "10+8+6")\n';
+                errorDetails += 'Column F: Difficulty\n';
+                errorDetails += 'Column G: Notes (optional)\n\n';
+                if (sampleRow) {
+                    errorDetails += `First row has ${sampleRow.length} column(s).\n`;
+                    errorDetails += `First row data: ${JSON.stringify(sampleRow.slice(0, 7))}`;
+                }
+                alert(errorDetails);
+                this.updateSyncStatus();
+                return;
             }
             
             this.sessions = sessionArray;
@@ -1693,7 +1776,14 @@ class WorkoutTracker {
             // Show success message with data counts
             const sessionCount = this.sessions.length;
             const exerciseCount = this.exerciseList.length;
-            alert(`Data synced successfully!\n\n${sessionCount} workout session(s) loaded\n${exerciseCount} exercise(s) loaded`);
+            
+            // Only show success if we actually loaded data
+            if (sessionCount > 0 || exerciseCount > 0) {
+                alert(`Data synced successfully!\n\n${sessionCount} workout session(s) loaded\n${exerciseCount} exercise(s) loaded`);
+            } else {
+                // This shouldn't happen if the earlier check worked, but just in case
+                alert('Sync completed, but no data was found in the sheet.\n\nPlease verify:\n1. The sheet has data in the correct format\n2. The Sheet ID is correct\n3. You have access to the sheet');
+            }
         } catch (error) {
             console.error('Sync error:', error);
             // Better error message handling
@@ -1860,6 +1950,16 @@ class WorkoutTracker {
 
         try {
             await this.initGoogleSheets();
+            
+            // CRITICAL: Ensure token is set on gapi.client before making API calls
+            // This is especially important on mobile browsers
+            if (gapi.client) {
+                gapi.client.setToken({ access_token: this.googleToken });
+                console.log('Token explicitly set for loadSessionsFromSheet API call');
+            } else {
+                console.error('gapi.client not available in loadSessionsFromSheet');
+                return null;
+            }
             
             console.log('Loading sessions from sheet:', this.sheetId);
             // Get the actual sheet tab name
