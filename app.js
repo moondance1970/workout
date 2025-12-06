@@ -154,12 +154,14 @@ class WorkoutTracker {
                     localStorage.setItem('googleAccessToken', this.googleToken);
                     localStorage.setItem('googleTokenExpiry', expiry.toISOString());
                     this.isSignedIn = true;
-                    this.loadUserInfo();
-                    this.updateSyncStatus();
-                    this.initGoogleSheets();
                     
-                    // Reload exercise list from Google Sheets
-                    this.loadExerciseList().then(exercises => {
+                    // Load user info (which will auto-connect to sheet and load exercises)
+                    this.loadUserInfo().then(async () => {
+                        this.updateSyncStatus();
+                        await this.initGoogleSheets();
+                        
+                        // Ensure exercise list is loaded (loadUserInfo should have done this, but ensure it)
+                        const exercises = await this.loadExerciseList();
                         this.exerciseList = exercises;
                         this.updateExerciseList();
                     });
@@ -222,18 +224,33 @@ class WorkoutTracker {
             
             this.updateSyncStatus();
             
-            // Try to verify the sheet is accessible
+            // Try to verify the sheet is accessible and load exercise list
             try {
                 await this.initGoogleSheets();
                 // Test access by trying to read the sheet
                 await gapi.client.sheets.spreadsheets.get({
                     spreadsheetId: userSheetId
                 });
+                
+                // Reload exercise list from Google Sheets now that we're connected
+                const sheetExercises = await this.loadExerciseListFromSheet();
+                if (sheetExercises && sheetExercises.length > 0) {
+                    this.exerciseList = sheetExercises;
+                    this.saveExerciseList(); // Save to localStorage as backup
+                    this.updateExerciseList();
+                } else {
+                    // If no exercises in sheet, try loading from localStorage or sessions
+                    this.exerciseList = await this.loadExerciseList();
+                    this.updateExerciseList();
+                }
             } catch (error) {
                 console.warn('Sheet might not be accessible:', error);
                 if (sheetStatus) {
                     sheetStatus.innerHTML = '<p style="color: orange;">⚠ Sheet ID found but may not be accessible. Please verify.</p>';
                 }
+                // Still try to load exercises from localStorage as fallback
+                this.exerciseList = await this.loadExerciseList();
+                this.updateExerciseList();
             }
         } else {
             // No sheet ID stored for this user
@@ -824,13 +841,19 @@ class WorkoutTracker {
     }
 
     async loadExerciseList() {
-        // Try to load from Google Sheets first (if signed in)
+        // Try to load from Google Sheets first (if signed in and sheet is connected)
         if (this.isSignedIn && this.sheetId) {
-            const sheetExercises = await this.loadExerciseListFromSheet();
-            if (sheetExercises && sheetExercises.length > 0) {
-                // Save to localStorage as backup
-                localStorage.setItem('exerciseList', JSON.stringify(sheetExercises));
-                return sheetExercises;
+            try {
+                // Make sure Google Sheets is initialized
+                await this.initGoogleSheets();
+                const sheetExercises = await this.loadExerciseListFromSheet();
+                if (sheetExercises && sheetExercises.length > 0) {
+                    // Save to localStorage as backup
+                    localStorage.setItem('exerciseList', JSON.stringify(sheetExercises));
+                    return sheetExercises;
+                }
+            } catch (error) {
+                console.warn('Error loading exercise list from sheet, falling back to localStorage:', error);
             }
         }
 
