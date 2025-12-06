@@ -402,6 +402,30 @@ textarea:focus {
     color: #999;
 }
 
+.exercise-name-container {
+    display: flex;
+    gap: 8px;
+    align-items: stretch;
+}
+
+.exercise-select {
+    flex: 1;
+    min-width: 0; /* Allows flex item to shrink below content size */
+}
+
+.exercise-input-new {
+    flex: 1;
+    min-width: 0;
+}
+
+.exercise-add-btn {
+    width: auto;
+    min-width: 80px;
+    padding: 12px 20px;
+    white-space: nowrap;
+    flex-shrink: 0; /* Prevents button from shrinking */
+}
+
 .user-name {
     color: white;
     font-weight: 600;

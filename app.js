@@ -242,9 +242,15 @@ class WorkoutTracker {
         
         // Exercise name select change handler
         document.getElementById('exercise-name').addEventListener('change', (e) => {
-            if (e.target.value) {
-                document.getElementById('exercise-name-new').style.display = 'none';
-                document.getElementById('exercise-name-new').value = '';
+            // Don't hide the input field immediately - let it linger
+            // Only hide if a value is actually selected (not empty)
+            if (e.target.value && e.target.value !== '') {
+                const newInput = document.getElementById('exercise-name-new');
+                // Only hide if the new input is empty
+                if (!newInput.value.trim()) {
+                    newInput.style.display = 'none';
+                    newInput.value = '';
+                }
             }
         });
 
@@ -261,9 +267,15 @@ class WorkoutTracker {
         // Show add exercise input when select is focused and empty
         document.getElementById('exercise-name').addEventListener('focus', () => {
             const select = document.getElementById('exercise-name');
+            const newInput = document.getElementById('exercise-name-new');
             if (!select.value) {
-                document.getElementById('exercise-name-new').style.display = 'block';
+                newInput.style.display = 'block';
             }
+        });
+
+        // Keep input visible when typing in it
+        document.getElementById('exercise-name-new').addEventListener('input', () => {
+            document.getElementById('exercise-name-new').style.display = 'block';
         });
     }
 

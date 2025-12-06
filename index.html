@@ -30,12 +30,12 @@
             <div class="workout-form">
                 <div class="form-group">
                     <label for="exercise-name">Exercise Name</label>
-                    <div style="display: flex; gap: 5px;">
-                        <select id="exercise-name" style="flex: 1;">
+                    <div class="exercise-name-container">
+                        <select id="exercise-name" class="exercise-select">
                             <option value="">Select or type to add new...</option>
                         </select>
-                        <input type="text" id="exercise-name-new" placeholder="New exercise name..." style="flex: 1; display: none;">
-                        <button type="button" id="add-exercise-btn" class="btn-secondary" style="white-space: nowrap;">+ Add</button>
+                        <input type="text" id="exercise-name-new" class="exercise-input-new" placeholder="New exercise name..." style="display: none;">
+                        <button type="button" id="add-exercise-btn" class="btn-secondary exercise-add-btn">+ Add</button>
                     </div>
                 </div>
 
