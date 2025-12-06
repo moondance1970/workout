@@ -170,6 +170,12 @@ class WorkoutTracker {
                         this.updateSyncStatus();
                         await this.initGoogleSheets();
                         
+                        // Reload sessions from Google Sheets (source of truth)
+                        this.sessions = await this.loadSessions();
+                        this.currentSession = this.getTodaySession();
+                        this.renderTodayWorkout();
+                        this.renderHistory(); // Refresh history display
+                        
                         // Ensure exercise list is loaded (loadUserInfo should have done this, but ensure it)
                         const exercises = await this.loadExerciseList();
                         this.exerciseList = exercises;
@@ -276,6 +282,12 @@ class WorkoutTracker {
                     spreadsheetId: userSheetId
                 });
                 
+                // Reload sessions from Google Sheets (source of truth)
+                this.sessions = await this.loadSessions();
+                this.currentSession = this.getTodaySession();
+                this.renderTodayWorkout();
+                this.renderHistory(); // Refresh history display
+                
                 // Reload exercise list from Google Sheets now that we're connected
                 const sheetExercises = await this.loadExerciseListFromSheet();
                 if (sheetExercises && sheetExercises.length > 0) {
@@ -288,7 +300,7 @@ class WorkoutTracker {
                     this.updateExerciseList();
                 }
                 
-                // Immediately sync to sheet after login
+                // Immediately sync to sheet after login (uploads local data if any)
                 await this.syncToSheet(true); // Silent sync
             } catch (error) {
                 console.warn('Sheet might not be accessible:', error);
