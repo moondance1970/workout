@@ -378,14 +378,23 @@ class WorkoutTracker {
                 const sheetStatus = document.getElementById('sheet-status');
                 if (sheetStatus) {
                     let errorMsg = '⚠ Error searching for sheet. ';
-                    if (error.message) {
+                    
+                    // Check for specific Drive API errors
+                    const errorStr = error.message || error.result?.error?.message || JSON.stringify(error);
+                    if (errorStr.includes('API discovery response missing') || errorStr.includes('discovery')) {
+                        errorMsg += 'The Google Drive API may not be enabled in your Google Cloud Console.\n\n';
+                        errorMsg += 'Please:\n';
+                        errorMsg += '1. Go to Google Cloud Console → APIs & Services → Library\n';
+                        errorMsg += '2. Search for "Google Drive API" and click Enable\n';
+                        errorMsg += '3. Refresh this page and try again';
+                    } else if (error.message) {
                         errorMsg += error.message;
                     } else if (error.result?.error) {
                         errorMsg += error.result.error.message || 'Please check your permissions.';
                     } else {
                         errorMsg += 'Please try clicking "Reconnect to Sheet" below.';
                     }
-                    sheetStatus.innerHTML = `<p style="color: orange;">${errorMsg}</p>`;
+                    sheetStatus.innerHTML = `<p style="color: orange; white-space: pre-line;">${errorMsg}</p>`;
                 }
                 return;
             }
@@ -517,12 +526,25 @@ class WorkoutTracker {
                 return;
             }
             
+            // Initialize both Sheets and Drive APIs together
             // Only initialize if not already initialized
+            // Note: gapi.client.init() can only be called once, so we need to initialize both together from the start
             if (!gapi.client.sheets) {
+                // First time initialization - initialize both APIs together
+                // Initialize both APIs together in one call
+                // This is the only way since gapi.client.init() can only be called once
                 await gapi.client.init({
                     apiKey: apiKey,
-                    discoveryDocs: ['https://sheets.googleapis.com/$discovery/rest?version=v4'],
+                    discoveryDocs: [
+                        'https://sheets.googleapis.com/$discovery/rest?version=v4',
+                        'https://www.googleapis.com/discovery/v1/apis/drive/v3/rest'
+                    ],
                 });
+                console.log('Both Sheets and Drive APIs initialized');
+            } else if (!gapi.client.drive) {
+                // Sheets was initialized without Drive (old session) - can't add it now
+                // User needs to refresh the page
+                throw new Error('Drive API not available. Please refresh the page to initialize both APIs together.');
             }
             
             // Always set the token before making API calls (in case it changed or expired)
@@ -536,6 +558,8 @@ class WorkoutTracker {
     }
 
     async initGoogleDrive() {
+        // Drive API is now initialized together with Sheets API
+        // Just ensure token is set
         if (!this.googleToken || !gapi) {
             console.warn('Cannot init Google Drive: token or gapi missing', {
                 hasToken: !!this.googleToken,
@@ -545,44 +569,22 @@ class WorkoutTracker {
         }
         
         try {
-            // Load the client library if not already loaded
-            if (!gapi.client) {
-                await new Promise((resolve) => {
-                    gapi.load('client', resolve);
-                });
+            // Make sure Sheets API is initialized (which also initializes Drive)
+            await this.initGoogleSheets();
+            
+            // Verify Drive API is available
+            if (!gapi.client || !gapi.client.drive) {
+                // If Drive API is not available, it means Sheets was initialized without it
+                // We need to tell the user to refresh the page
+                throw new Error('Drive API not available. Please refresh the page to initialize both APIs together.');
             }
             
-            const apiKey = await this.getApiKey();
-            if (!apiKey) {
-                console.error('Google API Key not configured');
-                return;
+            // Ensure token is set
+            if (gapi.client) {
+                gapi.client.setToken({ access_token: this.googleToken });
             }
             
-            // If Sheets API is already initialized, we can add Drive API to the same client
-            // Otherwise, initialize both together
-            if (gapi.client.sheets && !gapi.client.drive) {
-                // Sheets already initialized, add Drive API
-                await gapi.client.load('drive', 'v3');
-            } else if (!gapi.client.drive) {
-                // Initialize both APIs together if neither is initialized
-                if (!gapi.client.sheets) {
-                    await gapi.client.init({
-                        apiKey: apiKey,
-                        discoveryDocs: [
-                            'https://sheets.googleapis.com/$discovery/rest?version=v4',
-                            'https://www.googleapis.com/discovery/v1/apis/drive/v3/rest'
-                        ],
-                    });
-                } else {
-                    // Just add Drive API
-                    await gapi.client.load('drive', 'v3');
-                }
-            }
-            
-            // Always set the token before making API calls (in case it changed or expired)
-            // This is critical - the token must be set for every API call
-            gapi.client.setToken({ access_token: this.googleToken });
-            console.log('Google Drive API initialized with token');
+            console.log('Google Drive API ready');
         } catch (error) {
             console.error('Error initializing Google Drive:', error);
             throw error; // Re-throw so callers can handle it
@@ -1601,6 +1603,10 @@ class WorkoutTracker {
             return sheets;
         } catch (error) {
             console.error('Error searching for sheet by name:', error);
+            // If Drive API is not available, provide helpful message
+            if (error.message && error.message.includes('Drive API not available')) {
+                throw new Error('Drive API not loaded. Please refresh the page and try again.');
+            }
             throw error;
         }
     }
