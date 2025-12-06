@@ -1,0 +1,70 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <linearGradient id="bgGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#4CAF50;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#2E7D32;stop-opacity:1" />
+    </linearGradient>
+    <linearGradient id="dumbbellGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#FF6B35;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#D84315;stop-opacity:1" />
+    </linearGradient>
+  </defs>
+  
+  <!-- Background circle -->
+  <circle cx="256" cy="256" r="240" fill="url(#bgGrad)" stroke="#1B5E20" stroke-width="6"/>
+  
+  <!-- Stick figure lifting dumbbell -->
+  
+  <!-- Head -->
+  <circle cx="256" cy="120" r="28" fill="none" stroke="#FFFFFF" stroke-width="8" stroke-linecap="round"/>
+  
+  <!-- Body (torso) -->
+  <line x1="256" y1="148" x2="256" y2="280" stroke="#FFFFFF" stroke-width="8" stroke-linecap="round"/>
+  
+  <!-- Arms lifting dumbbell -->
+  <!-- Left arm (bent upward) -->
+  <line x1="256" y1="180" x2="180" y2="220" stroke="#FFFFFF" stroke-width="8" stroke-linecap="round"/>
+  <line x1="180" y1="220" x2="140" y2="200" stroke="#FFFFFF" stroke-width="8" stroke-linecap="round"/>
+  
+  <!-- Right arm (bent upward) -->
+  <line x1="256" y1="180" x2="332" y2="220" stroke="#FFFFFF" stroke-width="8" stroke-linecap="round"/>
+  <line x1="332" y1="220" x2="372" y2="200" stroke="#FFFFFF" stroke-width="8" stroke-linecap="round"/>
+  
+  <!-- Dumbbell -->
+  <!-- Left weight -->
+  <rect x="100" y="180" width="50" height="40" rx="6" fill="url(#dumbbellGrad)" stroke="#B71C1C" stroke-width="3"/>
+  <rect x="105" y="185" width="40" height="30" rx="3" fill="#FF8A65"/>
+  
+  <!-- Bar (fully connecting both weights) -->
+  <rect x="150" y="195" width="212" height="10" rx="5" fill="#424242" stroke="#212121" stroke-width="2"/>
+  <rect x="155" y="197" width="202" height="6" rx="3" fill="#616161"/>
+  
+  <!-- Right weight -->
+  <rect x="362" y="180" width="50" height="40" rx="6" fill="url(#dumbbellGrad)" stroke="#B71C1C" stroke-width="3"/>
+  <rect x="367" y="185" width="40" height="30" rx="3" fill="#FF8A65"/>
+  
+  <!-- Grip lines on bar -->
+  <line x1="200" y1="193" x2="200" y2="207" stroke="#757575" stroke-width="2" stroke-linecap="round"/>
+  <line x1="220" y1="193" x2="220" y2="207" stroke="#757575" stroke-width="2" stroke-linecap="round"/>
+  <line x1="292" y1="193" x2="292" y2="207" stroke="#757575" stroke-width="2" stroke-linecap="round"/>
+  <line x1="312" y1="193" x2="312" y2="207" stroke="#757575" stroke-width="2" stroke-linecap="round"/>
+  
+  <!-- Legs -->
+  <!-- Left leg -->
+  <line x1="256" y1="280" x2="220" y2="360" stroke="#FFFFFF" stroke-width="8" stroke-linecap="round"/>
+  <line x1="220" y1="360" x2="200" y2="400" stroke="#FFFFFF" stroke-width="8" stroke-linecap="round"/>
+  
+  <!-- Right leg -->
+  <line x1="256" y1="280" x2="292" y2="360" stroke="#FFFFFF" stroke-width="8" stroke-linecap="round"/>
+  <line x1="292" y1="360" x2="312" y2="400" stroke="#FFFFFF" stroke-width="8" stroke-linecap="round"/>
+  
+  <!-- Feet -->
+  <line x1="200" y1="400" x2="180" y2="400" stroke="#FFFFFF" stroke-width="8" stroke-linecap="round"/>
+  <line x1="312" y1="400" x2="332" y2="400" stroke="#FFFFFF" stroke-width="8" stroke-linecap="round"/>
+  
+  <!-- Energy/sparkle effects around dumbbell -->
+  <circle cx="80" cy="180" r="6" fill="#FFD700" opacity="0.8"/>
+  <circle cx="432" cy="180" r="6" fill="#FFD700" opacity="0.8"/>
+  <circle cx="120" cy="160" r="4" fill="#81C784" opacity="0.6"/>
+  <circle cx="392" cy="160" r="4" fill="#81C784" opacity="0.6"/>
+</svg>
