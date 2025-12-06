@@ -377,7 +377,15 @@ class WorkoutTracker {
                 console.error('Error searching for sheet:', error);
                 const sheetStatus = document.getElementById('sheet-status');
                 if (sheetStatus) {
-                    sheetStatus.innerHTML = '<p style="color: orange;">⚠ Error searching for sheet. Please try again.</p>';
+                    let errorMsg = '⚠ Error searching for sheet. ';
+                    if (error.message) {
+                        errorMsg += error.message;
+                    } else if (error.result?.error) {
+                        errorMsg += error.result.error.message || 'Please check your permissions.';
+                    } else {
+                        errorMsg += 'Please try clicking "Reconnect to Sheet" below.';
+                    }
+                    sheetStatus.innerHTML = `<p style="color: orange;">${errorMsg}</p>`;
                 }
                 return;
             }
@@ -1538,15 +1546,27 @@ class WorkoutTracker {
             await this.initGoogleDrive();
             
             // CRITICAL: Ensure token is set before API calls
-            if (gapi.client) {
-                gapi.client.setToken({ access_token: this.googleToken });
-            } else {
-                throw new Error('gapi.client not available');
+            if (!gapi.client) {
+                throw new Error('Google API client not initialized. Please refresh the page.');
+            }
+            
+            // Ensure token is set
+            gapi.client.setToken({ access_token: this.googleToken });
+            console.log('Token set for Drive API search');
+            
+            // Verify Drive API is loaded
+            if (!gapi.client.drive) {
+                console.error('Drive API not loaded, attempting to initialize...');
+                await this.initGoogleDrive();
+                if (!gapi.client.drive) {
+                    throw new Error('Google Drive API not available. Please refresh the page and sign in again.');
+                }
             }
             
             // Escape single quotes in sheet name for the query
             const escapedName = sheetName.replace(/'/g, "\\'");
             
+            console.log('Searching for sheet with name:', sheetName);
             const response = await gapi.client.drive.files.list({
                 q: `name='${escapedName}' and mimeType='application/vnd.google-apps.spreadsheet' and trashed=false`,
                 fields: 'files(id, name, modifiedTime)',
@@ -1696,18 +1716,33 @@ class WorkoutTracker {
             return;
         }
         
-        // Clear stored Sheet ID
-        this.saveSheetIdForUser(this.userEmail, null);
-        localStorage.removeItem('sheetId');
-        this.sheetId = null;
-        
         const sheetStatus = document.getElementById('sheet-status');
         if (sheetStatus) {
             sheetStatus.innerHTML = '<p style="color: #666;">Searching for sheet...</p>';
         }
         
-        // Force a fresh search
-        await this.autoConnectSheet(this.userEmail);
+        // Clear stored Sheet ID
+        this.saveSheetIdForUser(this.userEmail, null);
+        localStorage.removeItem('sheetId');
+        this.sheetId = null;
+        
+        try {
+            // Force a fresh search
+            await this.autoConnectSheet(this.userEmail);
+        } catch (error) {
+            console.error('Error reconnecting to sheet:', error);
+            if (sheetStatus) {
+                let errorMsg = '⚠ Error reconnecting. ';
+                if (error.message) {
+                    errorMsg += error.message;
+                } else if (error.result?.error) {
+                    errorMsg += error.result.error.message || 'Please check your permissions.';
+                } else {
+                    errorMsg += 'Please try signing out and signing in again to refresh permissions.';
+                }
+                sheetStatus.innerHTML = `<p style="color: orange;">${errorMsg}</p>`;
+            }
+        }
     }
 
     // connectSheet() removed - sheets are now automatically discovered by name
