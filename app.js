@@ -1598,6 +1598,12 @@ class WorkoutTracker {
             
             // Continue with connection process
             await this.completeSheetConnection(selectedSheet.id);
+            
+            // Show reconnect button
+            const reconnectBtn = document.getElementById('reconnect-sheet-btn');
+            if (reconnectBtn) {
+                reconnectBtn.style.display = 'block';
+            }
         } else {
             const sheetStatus = document.getElementById('sheet-status');
             if (sheetStatus) {
@@ -1656,11 +1662,23 @@ class WorkoutTracker {
             this.currentSession = this.getTodaySession();
             this.renderTodayWorkout();
             this.renderHistory();
+            
+            // Show reconnect button
+            const reconnectBtn = document.getElementById('reconnect-sheet-btn');
+            if (reconnectBtn) {
+                reconnectBtn.style.display = 'block';
+            }
         } catch (error) {
             console.warn('Error completing sheet connection:', error);
             const sheetStatus = document.getElementById('sheet-status');
             if (sheetStatus) {
                 sheetStatus.innerHTML = '<p style="color: orange;">⚠ Connected but error loading data. Please try syncing manually.</p>';
+            }
+            
+            // Show reconnect button even on error
+            const reconnectBtn = document.getElementById('reconnect-sheet-btn');
+            if (reconnectBtn) {
+                reconnectBtn.style.display = 'block';
             }
         }
     }
@@ -2251,16 +2269,26 @@ class WorkoutTracker {
     updateSyncStatus() {
         const indicator = document.getElementById('sync-indicator');
         const text = document.getElementById('sync-text');
+        const reconnectBtn = document.getElementById('reconnect-sheet-btn');
         
         if (this.isSignedIn && this.sheetId) {
             indicator.textContent = '🟢';
             text.textContent = 'Connected';
+            if (reconnectBtn) {
+                reconnectBtn.style.display = 'block';
+            }
         } else if (this.isSignedIn) {
             indicator.textContent = '🟡';
             text.textContent = 'Signed In';
+            if (reconnectBtn) {
+                reconnectBtn.style.display = 'block';
+            }
         } else {
             indicator.textContent = '⚪';
             text.textContent = 'Not Connected';
+            if (reconnectBtn) {
+                reconnectBtn.style.display = 'none';
+            }
         }
     }
 
