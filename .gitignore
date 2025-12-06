@@ -1,5 +1,5 @@
-# Configuration file with sensitive credentials
-config.js
+# Configuration file with sensitive credentials (root directory only)
+/config.js
 
 # Vercel
 .vercel
