@@ -1362,6 +1362,11 @@ class WorkoutTracker {
 
     updateExerciseList() {
         const select = document.getElementById('exercise-name');
+        if (!select) {
+            console.error('Exercise name select element not found');
+            return;
+        }
+        
         const currentValue = select.value;
         
         // Merge exercises from sessions with saved list
@@ -1372,9 +1377,13 @@ class WorkoutTracker {
             }
         });
 
+        console.log('updateExerciseList: Exercises from sessions:', Array.from(exercisesFromSessions));
+        console.log('updateExerciseList: Saved exercise list:', this.exerciseList);
+
         // Combine saved list with exercises from sessions
         const allExercises = new Set([...this.exerciseList, ...exercisesFromSessions]);
         this.exerciseList = Array.from(allExercises).sort();
+        console.log('updateExerciseList: Final exercise list:', this.exerciseList);
         this.saveExerciseList(); // Async, but fire-and-forget
 
         // Update select dropdown
@@ -1385,6 +1394,8 @@ class WorkoutTracker {
             option.textContent = name;
             select.appendChild(option);
         });
+
+        console.log('updateExerciseList: Dropdown updated with', select.options.length, 'options');
 
         // Restore previous selection if it still exists
         if (currentValue && this.exerciseList.includes(currentValue)) {
@@ -1636,22 +1647,53 @@ class WorkoutTracker {
             });
 
             // Google Sheets is source of truth - replace local data with sheet data
-            this.sessions = Object.values(newSessions);
+            const sessionArray = Object.values(newSessions);
+            console.log('Sync from sheet: Parsed', sessionArray.length, 'sessions from', rows.length, 'rows');
+            
+            if (sessionArray.length === 0 && rows.length > 0) {
+                console.warn('No sessions created from rows. First few rows:', rows.slice(0, 3));
+            }
+            
+            this.sessions = sessionArray;
+            console.log('Sync from sheet: Set sessions array. Length:', this.sessions.length);
+            if (this.sessions.length > 0) {
+                console.log('Sample session:', this.sessions[0]);
+            }
             this.saveSessions(); // Save to localStorage as backup
             this.currentSession = this.getTodaySession();
             
             // Also load exercise list from Google Sheets
             const sheetExercises = await this.loadExerciseListFromSheet();
+            console.log('Sync from sheet: Loaded', sheetExercises?.length || 0, 'exercises from Exercises tab');
             if (sheetExercises && sheetExercises.length > 0) {
                 this.exerciseList = sheetExercises;
                 this.saveExerciseList(); // Save to localStorage as backup
-                this.updateExerciseList();
+            } else {
+                console.warn('No exercises found in Exercises tab, will extract from sessions');
             }
             
+            // Always update exercise list (it will merge with exercises from sessions)
+            this.updateExerciseList();
+            console.log('Exercise list updated in dropdown. Final count:', this.exerciseList.length);
+            
+            // Force re-render everything
             this.renderTodayWorkout();
             this.renderHistory();
             this.updateSyncStatus();
-            alert('Data synced from Google Sheets successfully!');
+            
+            // If user is on history tab, make sure it's visible
+            const historyTab = document.getElementById('history-tab');
+            if (historyTab && historyTab.classList.contains('active')) {
+                // Force a re-render of history
+                setTimeout(() => {
+                    this.renderHistory();
+                }, 100);
+            }
+            
+            // Show success message with data counts
+            const sessionCount = this.sessions.length;
+            const exerciseCount = this.exerciseList.length;
+            alert(`Data synced successfully!\n\n${sessionCount} workout session(s) loaded\n${exerciseCount} exercise(s) loaded`);
         } catch (error) {
             console.error('Sync error:', error);
             // Better error message handling
