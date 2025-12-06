@@ -40,6 +40,13 @@ class WorkoutTracker {
         this.renderHistory();
         this.setupTabs(); // Setup tabs first so they work immediately
         this.updateSyncStatus();
+        
+        // Ensure reconnect button is visible if signed in
+        const reconnectBtn = document.getElementById('reconnect-sheet-btn');
+        if (reconnectBtn && this.isSignedIn) {
+            reconnectBtn.style.display = 'block';
+        }
+        
         // Initialize Google Auth after a delay to ensure scripts are loaded
         setTimeout(() => this.initGoogleAuth(), 100);
     }
