@@ -1112,8 +1112,26 @@ class WorkoutTracker {
         } catch (error) {
             console.error('Sync error:', error);
             if (!silent) {
-                alert('Error syncing to Google Sheets: ' + (error.message || 'Check console for details'));
+                // Better error message handling
+                let errorMessage = 'Unknown error';
+                if (error && typeof error === 'object') {
+                    errorMessage = error.message || error.error?.message || error.statusText || JSON.stringify(error);
+                } else if (error) {
+                    errorMessage = String(error);
+                }
+                
+                // Check for common errors
+                if (errorMessage.includes('403') || errorMessage.includes('permission')) {
+                    errorMessage = 'Permission denied. Make sure you have edit access to the Google Sheet.';
+                } else if (errorMessage.includes('404') || errorMessage.includes('not found')) {
+                    errorMessage = 'Sheet not found. Please check that the Sheet ID is correct.';
+                } else if (errorMessage.includes('401') || errorMessage.includes('unauthorized')) {
+                    errorMessage = 'Authentication failed. Please sign in again.';
+                }
+                
+                alert('Error syncing to Google Sheets: ' + errorMessage);
             }
+            this.updateSyncStatus();
         }
     }
 
@@ -1174,7 +1192,25 @@ class WorkoutTracker {
             alert('Data synced from Google Sheets successfully!');
         } catch (error) {
             console.error('Sync error:', error);
-            alert('Error syncing from Google Sheets: ' + error.message);
+            // Better error message handling
+            let errorMessage = 'Unknown error';
+            if (error && typeof error === 'object') {
+                errorMessage = error.message || error.error?.message || error.statusText || JSON.stringify(error);
+            } else if (error) {
+                errorMessage = String(error);
+            }
+            
+            // Check for common errors
+            if (errorMessage.includes('403') || errorMessage.includes('permission')) {
+                errorMessage = 'Permission denied. Make sure you have edit access to the Google Sheet.';
+            } else if (errorMessage.includes('404') || errorMessage.includes('not found')) {
+                errorMessage = 'Sheet not found. Please check that the Sheet ID is correct.';
+            } else if (errorMessage.includes('401') || errorMessage.includes('unauthorized')) {
+                errorMessage = 'Authentication failed. Please sign in again.';
+            }
+            
+            alert('Error syncing from Google Sheets: ' + errorMessage);
+            this.updateSyncStatus();
         }
     }
 
