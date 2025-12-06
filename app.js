@@ -13,8 +13,8 @@ let GOOGLE_CONFIG = null;
 
 class WorkoutTracker {
     constructor() {
-        this.sessions = this.loadSessions();
-        this.currentSession = this.getTodaySession();
+        this.sessions = []; // Will be loaded asynchronously
+        this.currentSession = { date: new Date().toISOString().split('T')[0], exercises: [] };
         this.chart = null;
         this.googleToken = null;
         this.sheetId = this.getSheetId();
@@ -27,6 +27,11 @@ class WorkoutTracker {
 
     async init() {
         this.setupEventListeners();
+        
+        // Load sessions (will try Google Sheets first if signed in)
+        this.sessions = await this.loadSessions();
+        this.currentSession = this.getTodaySession();
+        
         // Load exercise list (will try Google Sheets if signed in)
         this.exerciseList = await this.loadExerciseList();
         this.updateExerciseList(); // This will populate the select dropdown
@@ -71,15 +76,20 @@ class WorkoutTracker {
         if (token && tokenExpiry && new Date() < new Date(tokenExpiry)) {
             this.googleToken = token;
             this.isSignedIn = true;
-            // Load user info (which will auto-connect to sheet)
+            // Load user info (which will auto-connect to sheet, create if needed, and sync)
             await this.loadUserInfo();
             this.initGoogleSheets();
             this.updateSyncStatus();
+            
+            // Reload sessions from Google Sheets (source of truth)
+            this.sessions = await this.loadSessions();
+            this.currentSession = this.getTodaySession();
+            this.renderTodayWorkout();
+            this.renderHistory();
+            
             // Reload exercise list from Google Sheets if available
-            this.loadExerciseList().then(exercises => {
-                this.exerciseList = exercises;
-                this.updateExerciseList();
-            });
+            this.exerciseList = await this.loadExerciseList();
+            this.updateExerciseList();
         }
 
         // Create sign-in button
@@ -155,7 +165,7 @@ class WorkoutTracker {
                     localStorage.setItem('googleTokenExpiry', expiry.toISOString());
                     this.isSignedIn = true;
                     
-                    // Load user info (which will auto-connect to sheet and load exercises)
+                    // Load user info (which will auto-connect to sheet, create if needed, and sync)
                     this.loadUserInfo().then(async () => {
                         this.updateSyncStatus();
                         await this.initGoogleSheets();
@@ -203,7 +213,41 @@ class WorkoutTracker {
 
     async autoConnectSheet(userEmail) {
         // Load Sheet ID for this user
-        const userSheetId = this.getSheetIdForUser(userEmail);
+        let userSheetId = this.getSheetIdForUser(userEmail);
+        
+        // If no sheet ID exists, create a new sheet
+        if (!userSheetId) {
+            try {
+                await this.initGoogleSheets();
+                userSheetId = await this.createNewSheet();
+                
+                if (userSheetId) {
+                    // Save the new sheet ID for this user
+                    this.saveSheetIdForUser(userEmail, userSheetId);
+                    this.sheetId = userSheetId;
+                    localStorage.setItem('sheetId', userSheetId); // Keep backward compatibility
+                    
+                    // Update the input field
+                    const sheetIdInput = document.getElementById('sheet-id');
+                    if (sheetIdInput) {
+                        sheetIdInput.value = userSheetId;
+                    }
+                    
+                    // Update status
+                    const sheetStatus = document.getElementById('sheet-status');
+                    if (sheetStatus) {
+                        sheetStatus.innerHTML = '<p style="color: green;">✓ Created and connected to your new sheet</p>';
+                    }
+                }
+            } catch (error) {
+                console.error('Error creating new sheet:', error);
+                const sheetStatus = document.getElementById('sheet-status');
+                if (sheetStatus) {
+                    sheetStatus.innerHTML = '<p style="color: orange;">⚠ Could not create sheet automatically. Please create one manually.</p>';
+                }
+                return;
+            }
+        }
         
         if (userSheetId) {
             // Automatically connect to the sheet
@@ -243,6 +287,9 @@ class WorkoutTracker {
                     this.exerciseList = await this.loadExerciseList();
                     this.updateExerciseList();
                 }
+                
+                // Immediately sync to sheet after login
+                await this.syncToSheet(true); // Silent sync
             } catch (error) {
                 console.warn('Sheet might not be accessible:', error);
                 if (sheetStatus) {
@@ -258,6 +305,66 @@ class WorkoutTracker {
             if (sheetStatus) {
                 sheetStatus.innerHTML = '<p style="color: #666;">Enter your Google Sheet ID below to connect</p>';
             }
+        }
+    }
+
+    async createNewSheet() {
+        try {
+            await this.initGoogleSheets();
+            
+            // Create a new spreadsheet
+            const response = await gapi.client.sheets.spreadsheets.create({
+                properties: {
+                    title: 'Workout Tracker - ' + new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long' })
+                },
+                sheets: [
+                    {
+                        properties: {
+                            title: 'Sheet1',
+                            gridProperties: {
+                                rowCount: 1000,
+                                columnCount: 7
+                            }
+                        }
+                    },
+                    {
+                        properties: {
+                            title: 'Exercises',
+                            gridProperties: {
+                                rowCount: 1000,
+                                columnCount: 1
+                            }
+                        }
+                    }
+                ]
+            });
+            
+            const spreadsheetId = response.result.spreadsheetId;
+            
+            // Set up headers for Sheet1
+            await gapi.client.sheets.spreadsheets.values.update({
+                spreadsheetId: spreadsheetId,
+                range: 'Sheet1!A1:G1',
+                valueInputOption: 'RAW',
+                resource: {
+                    values: [['Date', 'Exercise', 'Weight', 'Sets', 'Reps', 'Difficulty', 'Notes']]
+                }
+            });
+            
+            // Set up headers for Exercises sheet
+            await gapi.client.sheets.spreadsheets.values.update({
+                spreadsheetId: spreadsheetId,
+                range: 'Exercises!A1',
+                valueInputOption: 'RAW',
+                resource: {
+                    values: [['Exercise Name']]
+                }
+            });
+            
+            return spreadsheetId;
+        } catch (error) {
+            console.error('Error creating new sheet:', error);
+            throw error;
         }
     }
 
@@ -314,15 +421,24 @@ class WorkoutTracker {
         
         // Exercise name select change handler
         document.getElementById('exercise-name').addEventListener('change', (e) => {
+            const selectedExercise = e.target.value.trim();
+            
             // Don't hide the input field immediately - let it linger
             // Only hide if a value is actually selected (not empty)
-            if (e.target.value && e.target.value !== '') {
+            if (selectedExercise && selectedExercise !== '') {
                 const newInput = document.getElementById('exercise-name-new');
                 // Only hide if the new input is empty
                 if (!newInput.value.trim()) {
                     newInput.style.display = 'none';
                     newInput.value = '';
                 }
+                
+                // Show last time and recommendations for selected exercise
+                this.showExercisePreview(selectedExercise);
+            } else {
+                // Clear recommendations if no exercise selected
+                const container = document.getElementById('recommendations-content');
+                container.innerHTML = '<p class="no-data">Select an exercise to see your last session and recommendations</p>';
             }
         });
 
@@ -503,15 +619,30 @@ class WorkoutTracker {
             this.saveExerciseList();
         }
 
+        // Save to localStorage first (for offline backup)
         this.saveSessions();
         this.updateExerciseList();
         this.renderTodayWorkout();
         this.showRecommendations(exercise);
         this.clearForm();
 
-        // Auto-sync to Google Sheets if connected
+        // Immediately sync to Google Sheets (sheet is source of truth)
         if (this.isSignedIn && this.sheetId) {
-            this.syncToSheet(true); // Silent sync
+            try {
+                await this.syncToSheet(true); // Silent sync - await to ensure it completes
+            } catch (error) {
+                console.error('Error syncing exercise to sheet:', error);
+                // Show a subtle notification that sync failed but data is saved locally
+                const statusEl = document.getElementById('sync-status');
+                if (statusEl) {
+                    const indicator = document.getElementById('sync-indicator');
+                    const text = document.getElementById('sync-text');
+                    if (indicator) indicator.textContent = '🟡';
+                    if (text) text.textContent = 'Sync Failed';
+                    // Reset after 3 seconds
+                    setTimeout(() => this.updateSyncStatus(), 3000);
+                }
+            }
         }
     }
 
@@ -519,12 +650,112 @@ class WorkoutTracker {
         document.getElementById('exercise-name').value = '';
         document.getElementById('exercise-name-new').value = '';
         document.getElementById('exercise-name-new').style.display = 'none';
+        this.clearFormFields();
+        document.getElementById('exercise-name').focus();
+    }
+
+    showExercisePreview(exerciseName) {
+        // Get all exercises with this name
+        const allExercises = [];
+        this.sessions.forEach(session => {
+            if (session.exercises) {
+                session.exercises.forEach(ex => {
+                    if (ex.name.toLowerCase() === exerciseName.toLowerCase()) {
+                        allExercises.push({ ...ex, date: session.date });
+                    }
+                });
+            }
+        });
+
+        const container = document.getElementById('recommendations-content');
+        
+        if (allExercises.length === 0) {
+            container.innerHTML = `<div class="recommendation-item">
+                <h4>${exerciseName}</h4>
+                <p class="no-data">No previous sessions found for this exercise</p>
+            </div>`;
+            // Clear form fields if no previous data
+            this.clearFormFields();
+            return;
+        }
+
+        // Sort by date (most recent first)
+        const sorted = allExercises.sort((a, b) => new Date(b.date) - new Date(a.date));
+        const lastExercise = sorted[0];
+        
+        // Populate form fields with last exercise values
+        this.populateFormFromLastExercise(lastExercise);
+        
+        // Format the date
+        const lastDate = new Date(lastExercise.date);
+        const dateStr = lastDate.toLocaleDateString('en-US', { 
+            weekday: 'short', 
+            year: 'numeric', 
+            month: 'short', 
+            day: 'numeric' 
+        });
+        
+        // Calculate days ago
+        const daysAgo = Math.floor((new Date() - lastDate) / (1000 * 60 * 60 * 24));
+        const daysAgoText = daysAgo === 0 ? 'Today' : daysAgo === 1 ? 'Yesterday' : `${daysAgo} days ago`;
+
+        let html = `
+            <div class="recommendation-item">
+                <h4>${exerciseName}</h4>
+                <p class="current"><strong>Last time:</strong> ${dateStr} (${daysAgoText})</p>
+                <p class="current">${lastExercise.weight}kg × ${lastExercise.sets} sets (${lastExercise.reps.join(', ')}) reps | ${this.formatDifficulty(lastExercise.difficulty)}</p>
+        `;
+
+        // Get recommendations if we have 2+ sessions
+        const recommendations = this.getRecommendations(exerciseName);
+        if (recommendations) {
+            const suggestion = recommendations.suggestion;
+            if (suggestion.action === 'increase') {
+                html += `<p class="suggestion">💚 Recommendation: ${suggestion.text}</p>`;
+            } else if (suggestion.action === 'decrease') {
+                html += `<p class="suggestion">🔴 Recommendation: ${suggestion.text}</p>`;
+            } else {
+                html += `<p class="suggestion">💙 Recommendation: ${suggestion.text}</p>`;
+            }
+        } else {
+            html += `<p class="suggestion">💙 Complete one more session to get recommendations</p>`;
+        }
+
+        html += '</div>';
+        container.innerHTML = html;
+    }
+
+    populateFormFromLastExercise(lastExercise) {
+        // Set weight
+        document.getElementById('weight').value = lastExercise.weight || '';
+        
+        // Set sets (this will trigger updateRepsInputs)
+        document.getElementById('sets').value = lastExercise.sets || 3;
+        
+        // Update reps inputs first (creates the right number of inputs)
+        this.updateRepsInputs();
+        
+        // Then populate each rep input
+        const repInputs = document.querySelectorAll('.rep-input');
+        if (lastExercise.reps && lastExercise.reps.length > 0) {
+            lastExercise.reps.forEach((rep, index) => {
+                if (repInputs[index]) {
+                    repInputs[index].value = rep || 0;
+                }
+            });
+        }
+        
+        // Keep difficulty and notes clear - don't prefill them
+        document.getElementById('difficulty').value = 'medium';
+        document.getElementById('notes').value = '';
+    }
+
+    clearFormFields() {
         document.getElementById('weight').value = '';
         document.getElementById('sets').value = '3';
         document.getElementById('difficulty').value = 'medium';
         document.getElementById('notes').value = '';
         this.updateRepsInputs();
-        document.getElementById('exercise-name').focus();
     }
 
     showRecommendations(currentExercise) {
@@ -1174,8 +1405,9 @@ class WorkoutTracker {
                 }
             });
 
+            // Google Sheets is source of truth - replace local data with sheet data
             this.sessions = Object.values(newSessions);
-            this.saveSessions();
+            this.saveSessions(); // Save to localStorage as backup
             this.currentSession = this.getTodaySession();
             
             // Also load exercise list from Google Sheets
@@ -1288,12 +1520,70 @@ class WorkoutTracker {
     }
 
     saveSessions() {
+        // Save to localStorage as backup (for offline use)
         localStorage.setItem('workoutSessions', JSON.stringify(this.sessions));
     }
 
-    loadSessions() {
+    async loadSessions() {
+        // Google Sheets is the source of truth - load from there first if available
+        if (this.isSignedIn && this.sheetId) {
+            try {
+                await this.initGoogleSheets();
+                const sheetSessions = await this.loadSessionsFromSheet();
+                if (sheetSessions && sheetSessions.length > 0) {
+                    // Save to localStorage as backup
+                    localStorage.setItem('workoutSessions', JSON.stringify(sheetSessions));
+                    return sheetSessions;
+                }
+            } catch (error) {
+                console.warn('Error loading sessions from sheet, falling back to localStorage:', error);
+            }
+        }
+        
+        // Fall back to localStorage if sheet not available or error
         const saved = localStorage.getItem('workoutSessions');
         return saved ? JSON.parse(saved) : [];
+    }
+
+    async loadSessionsFromSheet() {
+        if (!this.isSignedIn || !this.sheetId) return null;
+
+        try {
+            await this.initGoogleSheets();
+            
+            const response = await gapi.client.sheets.spreadsheets.values.get({
+                spreadsheetId: this.sheetId,
+                range: 'Sheet1!A2:G10000' // Increased range for more data
+            });
+
+            const rows = response.result.values || [];
+            const sessions = {};
+
+            rows.forEach(row => {
+                if (row.length >= 6) {
+                    const date = row[0];
+                    const exercise = {
+                        name: row[1],
+                        weight: parseFloat(row[2]) || 0,
+                        sets: parseInt(row[3]) || 1,
+                        reps: row[4] ? row[4].split('+').map(r => parseInt(r) || 0) : [0],
+                        difficulty: this.parseDifficulty(row[5]),
+                        notes: row[6] || '',
+                        timestamp: new Date().toISOString()
+                    };
+
+                    if (!sessions[date]) {
+                        sessions[date] = { date, exercises: [] };
+                    }
+                    sessions[date].exercises.push(exercise);
+                }
+            });
+
+            return Object.values(sessions);
+        } catch (error) {
+            console.error('Error loading sessions from sheet:', error);
+            return null;
+        }
     }
 }
 
