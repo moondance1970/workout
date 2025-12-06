@@ -489,7 +489,16 @@ class WorkoutTracker {
                 tabElement.classList.add('active');
                 
                 if (tab === 'history') {
-                    this.renderHistory();
+                    // Reload from Google Sheets when history tab is opened (to ensure latest data)
+                    if (this.isSignedIn && this.sheetId) {
+                        this.loadSessions().then(sessions => {
+                            this.sessions = sessions;
+                            this.currentSession = this.getTodaySession();
+                            this.renderHistory();
+                        });
+                    } else {
+                        this.renderHistory();
+                    }
                 }
             });
         });
@@ -1023,6 +1032,10 @@ class WorkoutTracker {
         const container = document.getElementById('history-content');
         const timeFilter = document.getElementById('time-filter').value;
         
+        // Debug: log sessions to see what we have
+        console.log('Rendering history with sessions:', this.sessions);
+        console.log('Number of sessions:', this.sessions.length);
+        
         let filteredSessions = [...this.sessions].sort((a, b) => new Date(b.date) - new Date(a.date));
         
         if (timeFilter !== 'all') {
@@ -1546,20 +1559,31 @@ class WorkoutTracker {
     }
 
     async loadSessionsFromSheet() {
-        if (!this.isSignedIn || !this.sheetId) return null;
+        if (!this.isSignedIn || !this.sheetId) {
+            console.log('Cannot load from sheet: isSignedIn=', this.isSignedIn, 'sheetId=', this.sheetId);
+            return null;
+        }
 
         try {
             await this.initGoogleSheets();
             
+            console.log('Loading sessions from sheet:', this.sheetId);
             const response = await gapi.client.sheets.spreadsheets.values.get({
                 spreadsheetId: this.sheetId,
                 range: 'Sheet1!A2:G10000' // Increased range for more data
             });
 
             const rows = response.result.values || [];
+            console.log('Rows loaded from sheet:', rows.length);
+            
             const sessions = {};
 
-            rows.forEach(row => {
+            rows.forEach((row, index) => {
+                // Debug first few rows
+                if (index < 3) {
+                    console.log(`Row ${index}:`, row);
+                }
+                
                 if (row.length >= 6) {
                     const date = row[0];
                     const exercise = {
@@ -1576,10 +1600,14 @@ class WorkoutTracker {
                         sessions[date] = { date, exercises: [] };
                     }
                     sessions[date].exercises.push(exercise);
+                } else {
+                    console.warn(`Row ${index} has insufficient columns (${row.length}):`, row);
                 }
             });
 
-            return Object.values(sessions);
+            const sessionArray = Object.values(sessions);
+            console.log('Sessions loaded from sheet:', sessionArray.length);
+            return sessionArray;
         } catch (error) {
             console.error('Error loading sessions from sheet:', error);
             return null;
