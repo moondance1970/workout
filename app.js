@@ -40,12 +40,6 @@ class WorkoutTracker {
         this.renderHistory();
         this.setupTabs(); // Setup tabs first so they work immediately
         this.updateSyncStatus();
-        if (this.sheetId) {
-            const sheetIdInput = document.getElementById('sheet-id');
-            if (sheetIdInput) {
-                sheetIdInput.value = this.sheetId;
-            }
-        }
         // Initialize Google Auth after a delay to ensure scripts are loaded
         setTimeout(() => this.initGoogleAuth(), 100);
     }
@@ -157,7 +151,7 @@ class WorkoutTracker {
             return;
         }
 
-        const scopes = 'https://www.googleapis.com/auth/spreadsheets https://www.googleapis.com/auth/userinfo.email https://www.googleapis.com/auth/userinfo.profile';
+        const scopes = 'https://www.googleapis.com/auth/spreadsheets https://www.googleapis.com/auth/drive.readonly https://www.googleapis.com/auth/userinfo.email https://www.googleapis.com/auth/userinfo.profile';
         
         // Use Google Identity Services token client
         const tokenClient = google.accounts.oauth2.initTokenClient({
@@ -229,35 +223,152 @@ class WorkoutTracker {
         // Load Sheet ID for this user
         let userSheetId = this.getSheetIdForUser(userEmail);
         
-        // If no sheet ID exists, create a new sheet
-        if (!userSheetId) {
+        // Validate the stored sheet ID if it exists
+        if (userSheetId) {
             try {
                 await this.initGoogleSheets();
-                userSheetId = await this.createNewSheet();
                 
-                if (userSheetId) {
-                    // Save the new sheet ID for this user
-                    this.saveSheetIdForUser(userEmail, userSheetId);
-                    this.sheetId = userSheetId;
-                    localStorage.setItem('sheetId', userSheetId); // Keep backward compatibility
+                // CRITICAL: Ensure token is set before API calls
+                if (gapi.client) {
+                    gapi.client.setToken({ access_token: this.googleToken });
+                }
+                
+                // Test if the sheet is accessible
+                await gapi.client.sheets.spreadsheets.get({
+                    spreadsheetId: userSheetId
+                });
+                
+                console.log('Stored sheet ID is valid:', userSheetId);
+            } catch (error) {
+                console.warn('Stored sheet ID is invalid or inaccessible:', error);
+                
+                // Invalid stored sheet ID - clear it and search by name instead
+                console.warn('Stored sheet ID invalid, will search by name instead');
+                this.saveSheetIdForUser(userEmail, null);
+                localStorage.removeItem('sheetId');
+                userSheetId = null; // Continue to search by name below
+            }
+        }
+        
+        // If no sheet ID exists, search for sheet by name
+        if (!userSheetId) {
+            try {
+                const defaultSheetName = 'Workout Tracker';
+                const matchingSheets = await this.findSheetByName(defaultSheetName);
+                
+                if (matchingSheets.length === 0) {
+                    // No sheet found - ask user what to do
+                    const userChoice = confirm(
+                        `No '${defaultSheetName}' sheet found. Would you like to:\n\n` +
+                        `Click OK to create a new sheet named '${defaultSheetName}'\n` +
+                        `Click Cancel to enter a sheet name manually`
+                    );
                     
-                    // Update the input field
-                    const sheetIdInput = document.getElementById('sheet-id');
-                    if (sheetIdInput) {
-                        sheetIdInput.value = userSheetId;
+                    if (userChoice) {
+                        // User chose to create new sheet
+                        try {
+                            userSheetId = await this.createNewSheet(defaultSheetName);
+                            if (userSheetId) {
+                                this.saveSheetIdForUser(userEmail, userSheetId);
+                                localStorage.setItem('sheetId', userSheetId);
+                                
+                                const sheetStatus = document.getElementById('sheet-status');
+                                if (sheetStatus) {
+                                    sheetStatus.innerHTML = `<p style="color: green;">✓ Created and connected to '${defaultSheetName}'</p>`;
+                                }
+                                
+                                // Complete the connection process
+                                await this.completeSheetConnection(userSheetId);
+                            }
+                        } catch (error) {
+                            console.error('Error creating new sheet:', error);
+                            const sheetStatus = document.getElementById('sheet-status');
+                            if (sheetStatus) {
+                                sheetStatus.innerHTML = '<p style="color: red;">Error creating sheet. Please try again.</p>';
+                            }
+                            return;
+                        }
+                    } else {
+                        // User chose to enter name manually
+                        const manualName = prompt('Enter the name of your workout sheet:');
+                        if (manualName && manualName.trim()) {
+                            const trimmedName = manualName.trim();
+                            const manualSheets = await this.findSheetByName(trimmedName);
+                            
+                            if (manualSheets.length === 0) {
+                                // Not found - create it
+                                try {
+                                    userSheetId = await this.createNewSheet(trimmedName);
+                                    if (userSheetId) {
+                                        this.saveSheetIdForUser(userEmail, userSheetId);
+                                        localStorage.setItem('sheetId', userSheetId);
+                                        
+                                        const sheetStatus = document.getElementById('sheet-status');
+                                        if (sheetStatus) {
+                                            sheetStatus.innerHTML = `<p style="color: green;">✓ Created and connected to '${trimmedName}'</p>`;
+                                        }
+                                        
+                                        // Complete the connection process
+                                        await this.completeSheetConnection(userSheetId);
+                                    }
+                                } catch (error) {
+                                    console.error('Error creating sheet:', error);
+                                    const sheetStatus = document.getElementById('sheet-status');
+                                    if (sheetStatus) {
+                                        sheetStatus.innerHTML = '<p style="color: red;">Error creating sheet. Please try again.</p>';
+                                    }
+                                    return;
+                                }
+                            } else if (manualSheets.length === 1) {
+                                // Found exactly one - use it
+                                userSheetId = manualSheets[0].id;
+                                this.saveSheetIdForUser(userEmail, userSheetId);
+                                localStorage.setItem('sheetId', userSheetId);
+                                
+                                const sheetStatus = document.getElementById('sheet-status');
+                                if (sheetStatus) {
+                                    sheetStatus.innerHTML = `<p style="color: green;">✓ Connected to '${trimmedName}'</p>`;
+                                }
+                                
+                                // Complete the connection process
+                                await this.completeSheetConnection(userSheetId);
+                            } else {
+                                // Multiple matches - let user choose
+                                await this.handleMultipleSheetMatches(manualSheets, userEmail);
+                                return; // handleMultipleSheetMatches will handle connection
+                            }
+                        } else {
+                            // User cancelled
+                            const sheetStatus = document.getElementById('sheet-status');
+                            if (sheetStatus) {
+                                sheetStatus.innerHTML = '<p style="color: #666;">Please connect to a sheet to sync your data.</p>';
+                            }
+                            return;
+                        }
                     }
+                } else if (matchingSheets.length === 1) {
+                    // Found exactly one - use it automatically
+                    userSheetId = matchingSheets[0].id;
+                    this.saveSheetIdForUser(userEmail, userSheetId);
+                    localStorage.setItem('sheetId', userSheetId);
                     
-                    // Update status
                     const sheetStatus = document.getElementById('sheet-status');
                     if (sheetStatus) {
-                        sheetStatus.innerHTML = '<p style="color: green;">✓ Created and connected to your new sheet</p>';
+                        sheetStatus.innerHTML = `<p style="color: green;">✓ Automatically connected to '${defaultSheetName}'</p>`;
                     }
+                    
+                    // Complete the connection process
+                    await this.completeSheetConnection(userSheetId);
+                } else {
+                    // Multiple matches - let user choose
+                    await this.handleMultipleSheetMatches(matchingSheets, userEmail);
+                    return; // handleMultipleSheetMatches will handle connection
                 }
             } catch (error) {
-                console.error('Error creating new sheet:', error);
+                console.error('Error searching for sheet:', error);
                 const sheetStatus = document.getElementById('sheet-status');
                 if (sheetStatus) {
-                    sheetStatus.innerHTML = '<p style="color: orange;">⚠ Could not create sheet automatically. Please create one manually.</p>';
+                    sheetStatus.innerHTML = '<p style="color: orange;">⚠ Error searching for sheet. Please try again.</p>';
                 }
                 return;
             }
@@ -265,91 +376,32 @@ class WorkoutTracker {
         
         if (userSheetId) {
             // Automatically connect to the sheet
-            this.sheetId = userSheetId;
-            localStorage.setItem('sheetId', userSheetId); // Keep backward compatibility
+            await this.completeSheetConnection(userSheetId);
             
-            // Update the input field
-            const sheetIdInput = document.getElementById('sheet-id');
-            if (sheetIdInput) {
-                sheetIdInput.value = userSheetId;
-            }
-            
-            // Update status
+            // Update status if not already set
             const sheetStatus = document.getElementById('sheet-status');
-            if (sheetStatus) {
+            if (sheetStatus && !sheetStatus.innerHTML.includes('Connected') && !sheetStatus.innerHTML.includes('Created')) {
                 sheetStatus.innerHTML = '<p style="color: green;">✓ Automatically connected to your sheet</p>';
-            }
-            
-            this.updateSyncStatus();
-            
-            // Try to verify the sheet is accessible and load exercise list
-            try {
-                await this.initGoogleSheets();
-                // Test access by trying to read the sheet
-                await gapi.client.sheets.spreadsheets.get({
-                    spreadsheetId: userSheetId
-                });
-                
-                // Reload sessions from Google Sheets (source of truth)
-                console.log('Auto-connecting: Loading sessions from sheet...');
-                const loadedSessions = await this.loadSessions();
-                console.log('Auto-connecting: Loaded sessions:', loadedSessions?.length || 0);
-                this.sessions = loadedSessions || [];
-                this.currentSession = this.getTodaySession();
-                
-                // Force re-render to ensure UI updates
-                this.renderTodayWorkout();
-                this.renderHistory(); // Refresh history display
-                console.log('Auto-connecting: Rendered history with', this.sessions.length, 'sessions');
-                
-                // Reload exercise list from Google Sheets now that we're connected
-                const sheetExercises = await this.loadExerciseListFromSheet();
-                if (sheetExercises && sheetExercises.length > 0) {
-                    console.log('Auto-connecting: Loaded', sheetExercises.length, 'exercises from sheet');
-                    this.exerciseList = sheetExercises;
-                    this.saveExerciseList(); // Save to localStorage as backup
-                    this.updateExerciseList();
-                } else {
-                    // If no exercises in sheet, try loading from localStorage or sessions
-                    console.log('Auto-connecting: No exercises in sheet, loading from fallback...');
-                    this.exerciseList = await this.loadExerciseList();
-                    this.updateExerciseList();
-                }
-                
-                // Immediately sync to sheet after login (uploads local data if any)
-                await this.syncToSheet(true); // Silent sync
-                
-                // After sync, reload to get the latest data
-                this.sessions = await this.loadSessions();
-                this.currentSession = this.getTodaySession();
-                this.renderTodayWorkout();
-                this.renderHistory();
-            } catch (error) {
-                console.warn('Sheet might not be accessible:', error);
-                if (sheetStatus) {
-                    sheetStatus.innerHTML = '<p style="color: orange;">⚠ Sheet ID found but may not be accessible. Please verify.</p>';
-                }
-                // Still try to load exercises from localStorage as fallback
-                this.exerciseList = await this.loadExerciseList();
-                this.updateExerciseList();
-            }
-        } else {
-            // No sheet ID stored for this user
-            const sheetStatus = document.getElementById('sheet-status');
-            if (sheetStatus) {
-                sheetStatus.innerHTML = '<p style="color: #666;">Enter your Google Sheet ID below to connect</p>';
             }
         }
     }
 
-    async createNewSheet() {
+    async createNewSheet(sheetName = 'Workout Tracker') {
         try {
             await this.initGoogleSheets();
             
-            // Create a new spreadsheet
+            // CRITICAL: Ensure token is set before creating sheet
+            if (gapi.client) {
+                gapi.client.setToken({ access_token: this.googleToken });
+                console.log('Token set for createNewSheet');
+            } else {
+                throw new Error('gapi.client not available');
+            }
+            
+            // Create a new spreadsheet with the provided name
             const response = await gapi.client.sheets.spreadsheets.create({
                 properties: {
-                    title: 'Workout Tracker - ' + new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long' })
+                    title: sheetName
                 },
                 sheets: [
                     {
@@ -375,6 +427,11 @@ class WorkoutTracker {
             
             const spreadsheetId = response.result.spreadsheetId;
             
+            // Ensure token is still set for update operations
+            if (gapi.client) {
+                gapi.client.setToken({ access_token: this.googleToken });
+            }
+            
             // Set up headers for Sheet1
             await gapi.client.sheets.spreadsheets.values.update({
                 spreadsheetId: spreadsheetId,
@@ -384,6 +441,11 @@ class WorkoutTracker {
                     values: [['Date', 'Exercise', 'Weight', 'Sets', 'Reps', 'Difficulty', 'Notes']]
                 }
             });
+            
+            // Ensure token is still set for second update
+            if (gapi.client) {
+                gapi.client.setToken({ access_token: this.googleToken });
+            }
             
             // Set up headers for Exercises sheet
             await gapi.client.sheets.spreadsheets.values.update({
@@ -456,13 +518,53 @@ class WorkoutTracker {
         }
     }
 
+    async initGoogleDrive() {
+        if (!this.googleToken || !gapi) {
+            console.warn('Cannot init Google Drive: token or gapi missing', {
+                hasToken: !!this.googleToken,
+                hasGapi: !!gapi
+            });
+            return;
+        }
+        
+        try {
+            // Load the client library if not already loaded
+            if (!gapi.client) {
+                await new Promise((resolve) => {
+                    gapi.load('client', resolve);
+                });
+            }
+            
+            const apiKey = await this.getApiKey();
+            if (!apiKey) {
+                console.error('Google API Key not configured');
+                return;
+            }
+            
+            // Only initialize if not already initialized
+            if (!gapi.client.drive) {
+                await gapi.client.init({
+                    apiKey: apiKey,
+                    discoveryDocs: ['https://www.googleapis.com/discovery/v1/apis/drive/v3/rest'],
+                });
+            }
+            
+            // Always set the token before making API calls (in case it changed or expired)
+            // This is critical - the token must be set for every API call
+            gapi.client.setToken({ access_token: this.googleToken });
+            console.log('Google Drive API initialized with token');
+        } catch (error) {
+            console.error('Error initializing Google Drive:', error);
+            throw error; // Re-throw so callers can handle it
+        }
+    }
+
     setupEventListeners() {
         document.getElementById('save-workout').addEventListener('click', () => this.saveExercise());
         document.getElementById('sets').addEventListener('input', () => this.updateRepsInputs());
         document.getElementById('exercise-filter').addEventListener('change', () => this.renderHistory());
         document.getElementById('time-filter').addEventListener('change', () => this.renderHistory());
         document.getElementById('sign-out-btn').addEventListener('click', () => this.signOut());
-        document.getElementById('connect-sheet-btn').addEventListener('click', () => this.connectSheet());
         document.getElementById('sync-to-sheet-btn').addEventListener('click', () => this.syncToSheet());
         document.getElementById('sync-from-sheet-btn').addEventListener('click', () => this.syncFromSheet());
         document.getElementById('export-btn').addEventListener('click', () => this.exportData());
@@ -1413,25 +1515,144 @@ class WorkoutTracker {
         }
     }
 
-    connectSheet() {
-        const sheetId = document.getElementById('sheet-id').value.trim();
-        if (!sheetId) {
-            alert('Please enter a Google Sheet ID');
-            return;
+    async findSheetByName(sheetName) {
+        if (!this.isSignedIn || !this.googleToken) {
+            console.warn('Cannot search for sheet: not signed in');
+            return [];
         }
-        this.sheetId = sheetId;
-        
-        // Save to localStorage (backward compatibility)
-        localStorage.setItem('sheetId', sheetId);
-        
-        // Also save per user if signed in
-        if (this.userEmail) {
-            this.saveSheetIdForUser(this.userEmail, sheetId);
+
+        try {
+            await this.initGoogleDrive();
+            
+            // CRITICAL: Ensure token is set before API calls
+            if (gapi.client) {
+                gapi.client.setToken({ access_token: this.googleToken });
+            } else {
+                throw new Error('gapi.client not available');
+            }
+            
+            // Escape single quotes in sheet name for the query
+            const escapedName = sheetName.replace(/'/g, "\\'");
+            
+            const response = await gapi.client.drive.files.list({
+                q: `name='${escapedName}' and mimeType='application/vnd.google-apps.spreadsheet' and trashed=false`,
+                fields: 'files(id, name, modifiedTime)',
+                orderBy: 'modifiedTime desc'
+            });
+            
+            const files = response.result.files || [];
+            console.log(`Found ${files.length} sheet(s) with name "${sheetName}"`);
+            
+            return files.map(file => ({
+                id: file.id,
+                name: file.name,
+                modifiedTime: file.modifiedTime
+            }));
+        } catch (error) {
+            console.error('Error searching for sheet by name:', error);
+            throw error;
         }
-        
-        document.getElementById('sheet-status').innerHTML = '<p style="color: green;">✓ Sheet ID saved</p>';
-        this.updateSyncStatus();
     }
+
+    async handleMultipleSheetMatches(sheets, userEmail) {
+        // Create a simple selection dialog
+        let message = `Found ${sheets.length} sheets with this name. Please choose one:\n\n`;
+        sheets.forEach((sheet, index) => {
+            const date = new Date(sheet.modifiedTime);
+            const dateStr = date.toLocaleDateString('en-US', { 
+                year: 'numeric', 
+                month: 'short', 
+                day: 'numeric',
+                hour: '2-digit',
+                minute: '2-digit'
+            });
+            message += `${index + 1}. ${sheet.name} (Last modified: ${dateStr})\n`;
+        });
+        message += `\nEnter the number (1-${sheets.length}):`;
+        
+        const choice = prompt(message);
+        const selectedIndex = parseInt(choice) - 1;
+        
+        if (selectedIndex >= 0 && selectedIndex < sheets.length) {
+            const selectedSheet = sheets[selectedIndex];
+            this.sheetId = selectedSheet.id;
+            this.saveSheetIdForUser(userEmail, selectedSheet.id);
+            localStorage.setItem('sheetId', selectedSheet.id);
+            
+            const sheetStatus = document.getElementById('sheet-status');
+            if (sheetStatus) {
+                sheetStatus.innerHTML = `<p style="color: green;">✓ Connected to '${selectedSheet.name}'</p>`;
+            }
+            
+            // Continue with connection process
+            await this.completeSheetConnection(selectedSheet.id);
+        } else {
+            const sheetStatus = document.getElementById('sheet-status');
+            if (sheetStatus) {
+                sheetStatus.innerHTML = '<p style="color: orange;">⚠ No sheet selected. Please try again.</p>';
+            }
+        }
+    }
+
+    async completeSheetConnection(sheetId) {
+        this.sheetId = sheetId;
+        this.updateSyncStatus();
+        
+        try {
+            await this.initGoogleSheets();
+            
+            // CRITICAL: Ensure token is set before API calls
+            if (gapi.client) {
+                gapi.client.setToken({ access_token: this.googleToken });
+            }
+            
+            // Test access by trying to read the sheet
+            await gapi.client.sheets.spreadsheets.get({
+                spreadsheetId: sheetId
+            });
+            
+            // Reload sessions from Google Sheets (source of truth)
+            console.log('Connecting: Loading sessions from sheet...');
+            const loadedSessions = await this.loadSessions();
+            console.log('Connecting: Loaded sessions:', loadedSessions?.length || 0);
+            this.sessions = loadedSessions || [];
+            this.currentSession = this.getTodaySession();
+            
+            // Force re-render to ensure UI updates
+            this.renderTodayWorkout();
+            this.renderHistory();
+            
+            // Reload exercise list from Google Sheets
+            const sheetExercises = await this.loadExerciseListFromSheet();
+            if (sheetExercises && sheetExercises.length > 0) {
+                console.log('Connecting: Loaded', sheetExercises.length, 'exercises from sheet');
+                this.exerciseList = sheetExercises;
+                this.saveExerciseList();
+                this.updateExerciseList();
+            } else {
+                this.exerciseList = await this.loadExerciseList();
+                this.updateExerciseList();
+            }
+            
+            // Immediately sync to sheet after connection (uploads local data if any)
+            await this.syncToSheet(true); // Silent sync
+            
+            // After sync, reload to get the latest data
+            this.sessions = await this.loadSessions();
+            this.currentSession = this.getTodaySession();
+            this.renderTodayWorkout();
+            this.renderHistory();
+        } catch (error) {
+            console.warn('Error completing sheet connection:', error);
+            const sheetStatus = document.getElementById('sheet-status');
+            if (sheetStatus) {
+                sheetStatus.innerHTML = '<p style="color: orange;">⚠ Connected but error loading data. Please try syncing manually.</p>';
+            }
+        }
+    }
+
+    // connectSheet() removed - sheets are now automatically discovered by name
+    // Users no longer need to manually enter Sheet IDs
 
     getSheetId() {
         // First try to get from user-specific storage if signed in
@@ -1452,7 +1673,12 @@ class WorkoutTracker {
 
     saveSheetIdForUser(userEmail, sheetId) {
         const userSheetIds = JSON.parse(localStorage.getItem('userSheetIds') || '{}');
-        userSheetIds[userEmail] = sheetId;
+        if (sheetId) {
+            userSheetIds[userEmail] = sheetId;
+        } else {
+            // Remove the entry if sheetId is null/undefined
+            delete userSheetIds[userEmail];
+        }
         localStorage.setItem('userSheetIds', JSON.stringify(userSheetIds));
     }
 
@@ -1576,7 +1802,7 @@ class WorkoutTracker {
                 if (errorMessage.includes('403') || errorMessage.includes('permission')) {
                     errorMessage = 'Permission denied. Make sure you have edit access to the Google Sheet.';
                 } else if (errorMessage.includes('404') || errorMessage.includes('not found')) {
-                    errorMessage = 'Sheet not found. Please check that the Sheet ID is correct.';
+                    errorMessage = 'Sheet not found. Please make sure the sheet exists and is accessible.';
                 } else if (errorMessage.includes('401') || errorMessage.includes('unauthorized')) {
                     errorMessage = 'Authentication failed. Please sign in again.';
                 }
@@ -1693,7 +1919,7 @@ class WorkoutTracker {
                     const apiErr = apiError.result.error;
                     if (apiErr.code === 404 || apiErr.message?.includes('not found')) {
                         errorMsg += 'Sheet not found. Please check:\n';
-                        errorMsg += '• The Sheet ID is correct\n';
+                        errorMsg += '• The sheet exists and is accessible\n';
                         errorMsg += '• The sheet exists and is accessible\n';
                     } else if (apiErr.code === 403 || apiErr.message?.includes('permission')) {
                         errorMsg += 'Permission denied. Please:\n';
@@ -1702,7 +1928,7 @@ class WorkoutTracker {
                     } else {
                         errorMsg += `Error: ${apiErr.message || JSON.stringify(apiErr)}\n\n`;
                         errorMsg += 'Please check:\n';
-                        errorMsg += '• The Sheet ID is correct\n';
+                        errorMsg += '• The sheet exists and is accessible\n';
                         errorMsg += '• You have access to the sheet\n';
                         errorMsg += '• The sheet tab name is correct\n';
                     }
@@ -1740,7 +1966,7 @@ class WorkoutTracker {
                 
                 let errorMsg = 'No data found in the sheet.\n\n';
                 errorMsg += 'Please verify:\n';
-                errorMsg += '1. The Sheet ID is correct\n';
+                errorMsg += '1. The sheet exists and is accessible\n';
                 errorMsg += '2. The sheet has data in the first tab\n';
                 errorMsg += '3. The data starts in column A\n';
                 if (availableTabs.length > 0) {
@@ -1864,7 +2090,7 @@ class WorkoutTracker {
                 alert(`Data synced successfully!\n\n${sessionCount} workout session(s) loaded\n${exerciseCount} exercise(s) loaded`);
             } else {
                 // This shouldn't happen if the earlier check worked, but just in case
-                alert('Sync completed, but no data was found in the sheet.\n\nPlease verify:\n1. The sheet has data in the correct format\n2. The Sheet ID is correct\n3. You have access to the sheet');
+                alert('Sync completed, but no data was found in the sheet.\n\nPlease verify:\n1. The sheet has data in the correct format\n2. The sheet exists and is accessible\n3. You have access to the sheet');
             }
         } catch (error) {
             console.error('Sync error:', error);
