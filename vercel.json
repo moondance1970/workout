@@ -1,10 +1,4 @@
 {
-  "version": 2,
-  "routes": [
-    {
-      "src": "/api/config",
-      "dest": "/api/config.js"
-    }
-  ]
+  "version": 2
 }
 
