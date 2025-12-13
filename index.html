@@ -3,15 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta name="description" content="Track your workouts and sync across devices">
-    <meta name="theme-color" content="#4CAF50">
-    <meta name="apple-mobile-web-app-capable" content="yes">
-    <meta name="apple-mobile-web-app-status-bar-style" content="default">
-    <meta name="apple-mobile-web-app-title" content="Workout Tracker">
     <title>Workout Tracker</title>
-    <link rel="manifest" href="manifest.json">
-    <link rel="icon" type="image/svg+xml" href="icon.svg">
-    <link rel="apple-touch-icon" href="icon.svg">
     <link rel="stylesheet" href="styles.css">
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <!-- Google API Client Library -->
@@ -25,6 +17,9 @@
             <div class="sync-status" id="sync-status">
                 <span id="sync-indicator">⚪</span>
                 <span id="sync-text">Not Connected</span>
+            </div>
+            <div style="margin-bottom: 15px;">
+                <button id="session-btn" style="width: auto; padding: 10px 20px; margin: 0;">New Session</button>
             </div>
             <div class="nav-tabs">
                 <button class="tab-btn active" data-tab="track">Track Workout</button>

@@ -22,6 +22,7 @@ class WorkoutTracker {
         this.googleConfig = null; // Will be set from GOOGLE_CONFIG or API
         this.exerciseList = []; // Will be loaded asynchronously
         this.userEmail = null; // Store user email for per-user sheet ID
+        this.sessionActive = false; // Track if a session is currently active
         this.init();
     }
 
@@ -40,6 +41,7 @@ class WorkoutTracker {
         this.renderHistory();
         this.setupTabs(); // Setup tabs first so they work immediately
         this.updateSyncStatus();
+        this.updateSessionButton(); // Initialize session button state
         
         // Ensure reconnect button is visible if signed in
         const reconnectBtn = document.getElementById('reconnect-sheet-btn');
@@ -201,6 +203,72 @@ class WorkoutTracker {
         
         // Request token with consent to ensure we get all permissions
         tokenClient.requestAccessToken({ prompt: 'consent' });
+    }
+
+    requestAccessTokenPromise() {
+        return new Promise((resolve) => {
+            // Request OAuth2 token with proper scopes
+            this.getClientId().then(clientId => {
+                if (!clientId) {
+                    alert('Google OAuth Client ID not configured. Please check your settings.');
+                    resolve(false);
+                    return;
+                }
+
+                const scopes = 'https://www.googleapis.com/auth/spreadsheets https://www.googleapis.com/auth/drive.readonly https://www.googleapis.com/auth/userinfo.email https://www.googleapis.com/auth/userinfo.profile';
+                
+                // Use Google Identity Services token client
+                const tokenClient = google.accounts.oauth2.initTokenClient({
+                    client_id: clientId,
+                    scope: scopes,
+                    callback: (tokenResponse) => {
+                        if (tokenResponse.access_token) {
+                            this.googleToken = tokenResponse.access_token;
+                            // Store token with expiry (subtract 5 minutes for safety)
+                            const expiry = new Date(Date.now() + (tokenResponse.expires_in - 300) * 1000);
+                            localStorage.setItem('googleAccessToken', this.googleToken);
+                            localStorage.setItem('googleTokenExpiry', expiry.toISOString());
+                            this.isSignedIn = true;
+                            
+                            // Load user info (which will auto-connect to sheet, create if needed, and sync)
+                            this.loadUserInfo().then(async () => {
+                                this.updateSyncStatus();
+                                await this.initGoogleSheets();
+                                
+                                // Reload sessions from Google Sheets (source of truth)
+                                this.sessions = await this.loadSessions();
+                                this.currentSession = this.getTodaySession();
+                                this.renderTodayWorkout();
+                                this.renderHistory(); // Refresh history display
+                                
+                                // Ensure exercise list is loaded (loadUserInfo should have done this, but ensure it)
+                                const exercises = await this.loadExerciseList();
+                                this.exerciseList = exercises;
+                                this.updateExerciseList();
+                            });
+                            
+                            // Update button
+                            const buttonContainer = document.getElementById('google-signin-button');
+                            if (buttonContainer) {
+                                buttonContainer.innerHTML = '<p style="color: green;">✓ Signed in successfully!</p>';
+                            }
+                            
+                            resolve(true);
+                        } else if (tokenResponse.error) {
+                            if (tokenResponse.error !== 'popup_closed_by_user') {
+                                alert('Sign-in error: ' + tokenResponse.error);
+                            }
+                            resolve(false);
+                        }
+                    },
+                });
+                
+                // Request token with consent to ensure we get all permissions
+                tokenClient.requestAccessToken({ prompt: 'consent' });
+            }).catch(() => {
+                resolve(false);
+            });
+        });
     }
 
     async loadUserInfo() {
@@ -378,23 +446,14 @@ class WorkoutTracker {
                 const sheetStatus = document.getElementById('sheet-status');
                 if (sheetStatus) {
                     let errorMsg = '⚠ Error searching for sheet. ';
-                    
-                    // Check for specific Drive API errors
-                    const errorStr = error.message || error.result?.error?.message || JSON.stringify(error);
-                    if (errorStr.includes('API discovery response missing') || errorStr.includes('discovery')) {
-                        errorMsg += 'The Google Drive API may not be enabled in your Google Cloud Console.\n\n';
-                        errorMsg += 'Please:\n';
-                        errorMsg += '1. Go to Google Cloud Console → APIs & Services → Library\n';
-                        errorMsg += '2. Search for "Google Drive API" and click Enable\n';
-                        errorMsg += '3. Refresh this page and try again';
-                    } else if (error.message) {
+                    if (error.message) {
                         errorMsg += error.message;
                     } else if (error.result?.error) {
                         errorMsg += error.result.error.message || 'Please check your permissions.';
                     } else {
                         errorMsg += 'Please try clicking "Reconnect to Sheet" below.';
                     }
-                    sheetStatus.innerHTML = `<p style="color: orange; white-space: pre-line;">${errorMsg}</p>`;
+                    sheetStatus.innerHTML = `<p style="color: orange;">${errorMsg}</p>`;
                 }
                 return;
             }
@@ -526,25 +585,12 @@ class WorkoutTracker {
                 return;
             }
             
-            // Initialize both Sheets and Drive APIs together
             // Only initialize if not already initialized
-            // Note: gapi.client.init() can only be called once, so we need to initialize both together from the start
             if (!gapi.client.sheets) {
-                // First time initialization - initialize both APIs together
-                // Initialize both APIs together in one call
-                // This is the only way since gapi.client.init() can only be called once
                 await gapi.client.init({
                     apiKey: apiKey,
-                    discoveryDocs: [
-                        'https://sheets.googleapis.com/$discovery/rest?version=v4',
-                        'https://www.googleapis.com/discovery/v1/apis/drive/v3/rest'
-                    ],
+                    discoveryDocs: ['https://sheets.googleapis.com/$discovery/rest?version=v4'],
                 });
-                console.log('Both Sheets and Drive APIs initialized');
-            } else if (!gapi.client.drive) {
-                // Sheets was initialized without Drive (old session) - can't add it now
-                // User needs to refresh the page
-                throw new Error('Drive API not available. Please refresh the page to initialize both APIs together.');
             }
             
             // Always set the token before making API calls (in case it changed or expired)
@@ -558,8 +604,6 @@ class WorkoutTracker {
     }
 
     async initGoogleDrive() {
-        // Drive API is now initialized together with Sheets API
-        // Just ensure token is set
         if (!this.googleToken || !gapi) {
             console.warn('Cannot init Google Drive: token or gapi missing', {
                 hasToken: !!this.googleToken,
@@ -569,22 +613,44 @@ class WorkoutTracker {
         }
         
         try {
-            // Make sure Sheets API is initialized (which also initializes Drive)
-            await this.initGoogleSheets();
-            
-            // Verify Drive API is available
-            if (!gapi.client || !gapi.client.drive) {
-                // If Drive API is not available, it means Sheets was initialized without it
-                // We need to tell the user to refresh the page
-                throw new Error('Drive API not available. Please refresh the page to initialize both APIs together.');
+            // Load the client library if not already loaded
+            if (!gapi.client) {
+                await new Promise((resolve) => {
+                    gapi.load('client', resolve);
+                });
             }
             
-            // Ensure token is set
-            if (gapi.client) {
-                gapi.client.setToken({ access_token: this.googleToken });
+            const apiKey = await this.getApiKey();
+            if (!apiKey) {
+                console.error('Google API Key not configured');
+                return;
             }
             
-            console.log('Google Drive API ready');
+            // If Sheets API is already initialized, we can add Drive API to the same client
+            // Otherwise, initialize both together
+            if (gapi.client.sheets && !gapi.client.drive) {
+                // Sheets already initialized, add Drive API
+                await gapi.client.load('drive', 'v3');
+            } else if (!gapi.client.drive) {
+                // Initialize both APIs together if neither is initialized
+                if (!gapi.client.sheets) {
+                    await gapi.client.init({
+                        apiKey: apiKey,
+                        discoveryDocs: [
+                            'https://sheets.googleapis.com/$discovery/rest?version=v4',
+                            'https://www.googleapis.com/discovery/v1/apis/drive/v3/rest'
+                        ],
+                    });
+                } else {
+                    // Just add Drive API
+                    await gapi.client.load('drive', 'v3');
+                }
+            }
+            
+            // Always set the token before making API calls (in case it changed or expired)
+            // This is critical - the token must be set for every API call
+            gapi.client.setToken({ access_token: this.googleToken });
+            console.log('Google Drive API initialized with token');
         } catch (error) {
             console.error('Error initializing Google Drive:', error);
             throw error; // Re-throw so callers can handle it
@@ -606,6 +672,7 @@ class WorkoutTracker {
         document.getElementById('export-btn').addEventListener('click', () => this.exportData());
         document.getElementById('import-file').addEventListener('change', (e) => this.importData(e));
         document.getElementById('clear-local-btn').addEventListener('click', () => this.clearLocalData());
+        document.getElementById('session-btn').addEventListener('click', () => this.handleSessionButton());
         
         // Exercise name select change handler
         document.getElementById('exercise-name').addEventListener('change', (e) => {
@@ -1603,10 +1670,6 @@ class WorkoutTracker {
             return sheets;
         } catch (error) {
             console.error('Error searching for sheet by name:', error);
-            // If Drive API is not available, provide helpful message
-            if (error.message && error.message.includes('Drive API not available')) {
-                throw new Error('Drive API not loaded. Please refresh the page and try again.');
-            }
             throw error;
         }
     }
@@ -2466,6 +2529,164 @@ class WorkoutTracker {
         } catch (error) {
             console.error('Error loading sessions from sheet:', error);
             return null;
+        }
+    }
+
+    async handleSessionButton() {
+        if (this.sessionActive) {
+            await this.endSession();
+        } else {
+            await this.startSession();
+        }
+    }
+
+    async startSession() {
+        const sessionBtn = document.getElementById('session-btn');
+        if (!sessionBtn) return;
+
+        try {
+            // Disable button during process
+            sessionBtn.disabled = true;
+            sessionBtn.textContent = 'Connecting...';
+
+            // Step 1: Ensure user is logged in to Google
+            if (!this.isSignedIn || !this.googleToken) {
+                // Check if token exists but might be expired
+                const tokenExpiry = localStorage.getItem('googleTokenExpiry');
+                if (tokenExpiry && new Date() >= new Date(tokenExpiry)) {
+                    // Token expired, need to re-authenticate
+                    sessionBtn.disabled = false;
+                    this.updateSessionButton();
+                    alert('Your Google session has expired. Please sign in again in Settings.');
+                    return;
+                }
+
+                // Not signed in, request access token using promise wrapper
+                sessionBtn.textContent = 'Signing in...';
+                const signedIn = await this.requestAccessTokenPromise();
+                
+                if (!signedIn) {
+                    sessionBtn.disabled = false;
+                    this.updateSessionButton();
+                    // User cancelled or error occurred
+                    return;
+                }
+                
+                // Wait a bit for the sign-in process to complete
+                await new Promise(resolve => setTimeout(resolve, 1500));
+                
+                // Check again if we're signed in
+                if (!this.isSignedIn || !this.googleToken) {
+                sessionBtn.disabled = false;
+                this.updateSessionButton();
+                alert('Sign-in incomplete. Please try again.');
+                    return;
+                }
+            }
+
+            // Step 2: Ensure Google Sheets is initialized
+            sessionBtn.textContent = 'Initializing...';
+            await this.initGoogleSheets();
+
+            // Step 3: Ensure sheet is connected
+            if (!this.sheetId) {
+                sessionBtn.textContent = 'Connecting to sheet...';
+                // Try to auto-connect
+                if (this.userEmail) {
+                    await this.autoConnectSheet(this.userEmail);
+                }
+                
+                if (!this.sheetId) {
+                sessionBtn.disabled = false;
+                this.updateSessionButton();
+                alert('Please connect to a Google Sheet first. You can do this in the Settings tab.');
+                    return;
+                }
+            }
+
+            // Step 4: Sync from Google Sheets (load exercises, sessions, last done dates)
+            sessionBtn.textContent = 'Syncing from Google...';
+            
+            // Sync sessions and exercises from sheet
+            await this.syncFromSheet();
+            
+            // Reload current session (today's session)
+            this.currentSession = this.getTodaySession();
+            
+            // Update UI
+            this.renderTodayWorkout();
+            this.renderHistory();
+            this.updateExerciseList();
+
+            // Step 5: Mark session as active and update button
+            this.sessionActive = true;
+            sessionBtn.disabled = false;
+            this.updateSessionButton();
+            
+            // Update sync status
+            this.updateSyncStatus();
+            
+            console.log('Session started successfully');
+        } catch (error) {
+            console.error('Error starting session:', error);
+            sessionBtn.disabled = false;
+            this.updateSessionButton();
+            alert('Error starting session: ' + (error.message || 'Unknown error'));
+        }
+    }
+
+    async endSession() {
+        const sessionBtn = document.getElementById('session-btn');
+        if (!sessionBtn) return;
+
+        try {
+            // Disable button during sync
+            sessionBtn.disabled = true;
+            sessionBtn.textContent = 'Syncing to Google...';
+
+            // Ensure we're still signed in
+            if (!this.isSignedIn || !this.googleToken || !this.sheetId) {
+                sessionBtn.disabled = false;
+                this.updateSessionButton();
+                alert('Not connected to Google. Session ended locally.');
+                this.sessionActive = false;
+                this.updateSessionButton();
+                return;
+            }
+
+            // Sync back to Google Sheets
+            await this.initGoogleSheets();
+            await this.syncToSheet(true); // Silent sync (no alert)
+
+            // Mark session as inactive and update button
+            this.sessionActive = false;
+            sessionBtn.disabled = false;
+            this.updateSessionButton();
+            
+            // Update sync status
+            this.updateSyncStatus();
+            
+            console.log('Session ended successfully');
+        } catch (error) {
+            console.error('Error ending session:', error);
+            sessionBtn.disabled = false;
+            this.updateSessionButton();
+            alert('Error syncing to Google: ' + (error.message || 'Unknown error') + '\n\nYour data is saved locally.');
+        }
+    }
+
+    updateSessionButton() {
+        const sessionBtn = document.getElementById('session-btn');
+        if (!sessionBtn) return;
+
+        if (this.sessionActive) {
+            sessionBtn.textContent = 'End Session';
+            sessionBtn.style.background = 'rgba(244, 67, 54, 0.9)';
+            sessionBtn.style.borderColor = 'rgba(244, 67, 54, 1)';
+        } else {
+            sessionBtn.textContent = 'New Session';
+            sessionBtn.style.background = 'rgba(255, 255, 255, 0.2)';
+            sessionBtn.style.borderColor = 'rgba(255, 255, 255, 0.3)';
         }
     }
 }
