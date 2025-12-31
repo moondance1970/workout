@@ -27,7 +27,6 @@
             <div class="nav-tabs">
                 <button class="tab-btn active" data-tab="track">Track Workout</button>
                 <button class="tab-btn" data-tab="history">History & Graphs</button>
-                <button class="tab-btn" data-tab="settings">Settings</button>
             </div>
         </header>
 
@@ -118,44 +117,6 @@
             </div>
         </div>
 
-        <!-- Settings Tab -->
-        <div id="settings-tab" class="tab-content">
-            <div class="settings-section">
-                <h3>🔐 Google Account</h3>
-                <div id="google-auth-section">
-                    <div id="user-info" style="display: none; margin-top: 15px;">
-                        <p class="user-name" id="user-name"></p>
-                        <button id="sign-out-btn" class="btn-secondary">Sign Out</button>
-                    </div>
-                </div>
-            </div>
-
-            <div class="settings-section">
-                <h3>📊 Google Sheets</h3>
-                <p class="settings-desc">Your workout data automatically syncs with your Google Sheet. The app will find or create a sheet named "Workout Tracker" when you sign in.</p>
-                <div id="sheet-status" style="margin-top: 10px;"></div>
-                <div style="margin-top: 15px;">
-                    <button id="reconnect-sheet-btn" class="btn-secondary" style="width: 100%;">🔄 Reconnect to Sheet</button>
-                </div>
-            </div>
-
-            <div class="settings-section">
-                <h3>📤 Export & Import</h3>
-                <p class="settings-desc">Backup your data or transfer between devices</p>
-                <div class="settings-buttons">
-                    <button id="export-btn" class="btn-secondary">📥 Export Data</button>
-                    <label for="import-file" class="btn-secondary">📤 Import Data</label>
-                    <input type="file" id="import-file" accept=".json" style="display: none;">
-                </div>
-            </div>
-
-            <div class="settings-section">
-                <h3>🗑️ Data Management</h3>
-                <div class="settings-buttons">
-                    <button id="clear-local-btn" class="btn-danger">Clear Local Data</button>
-                </div>
-            </div>
-        </div>
     </div>
 
     <script type="module" src="app.js"></script>

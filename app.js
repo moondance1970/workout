@@ -64,11 +64,7 @@ class WorkoutTracker {
         this.updateSyncStatus();
         this.updateSessionButton(); // Initialize session button state
         
-        // Ensure reconnect button is visible if signed in
-        const reconnectBtn = document.getElementById('reconnect-sheet-btn');
-        if (reconnectBtn && this.isSignedIn) {
-            reconnectBtn.style.display = 'block';
-        }
+        // Settings removed - all data is cloud-based
         
         // Initialize Google Auth after a delay to ensure scripts are loaded
         setTimeout(() => this.initGoogleAuth(), 100);
@@ -297,8 +293,7 @@ class WorkoutTracker {
             if (response.ok) {
                 const data = await response.json();
                 if (data.name || data.email) {
-                    document.getElementById('user-name').textContent = `Signed in as: ${data.name || data.email}`;
-                    document.getElementById('user-info').style.display = 'block';
+                    // User info display removed (settings tab removed)
                     
                     // Store user email for sheet ID lookup
                     if (data.email) {
@@ -614,12 +609,7 @@ class WorkoutTracker {
             this.saveSheetIdForUser(this.userEmail, null);
         }
         
-        // Update UI
-        document.getElementById('user-info').style.display = 'none';
-        const settingsButtonContainer = document.getElementById('google-signin-button');
-        if (settingsButtonContainer) {
-            settingsButtonContainer.innerHTML = '<p class="settings-desc">Sign in with Google in the header to start a session</p>';
-        }
+        // Update UI (settings removed - all cloud-based)
         this.updateSyncStatus();
         this.updateHeaderButtons(); // Update header buttons
         
@@ -732,14 +722,8 @@ class WorkoutTracker {
         document.getElementById('sets').addEventListener('input', () => this.updateRepsInputs());
         document.getElementById('exercise-filter').addEventListener('change', () => this.renderHistory());
         document.getElementById('time-filter').addEventListener('change', () => this.renderHistory());
-        document.getElementById('sign-out-btn').addEventListener('click', () => this.signOut());
-        const reconnectBtn = document.getElementById('reconnect-sheet-btn');
-        if (reconnectBtn) {
-            reconnectBtn.addEventListener('click', () => this.reconnectToSheet());
-        }
-        document.getElementById('export-btn').addEventListener('click', () => this.exportData());
-        document.getElementById('import-file').addEventListener('change', (e) => this.importData(e));
-        document.getElementById('clear-local-btn').addEventListener('click', () => this.clearLocalData());
+        // Settings tab removed - all data is cloud-based
+        // Settings tab removed - all data is cloud-based
         document.getElementById('session-btn').addEventListener('click', () => this.handleSessionButton());
         const skipTimerBtn = document.getElementById('skip-timer-btn');
         if (skipTimerBtn) {
@@ -1670,50 +1654,26 @@ class WorkoutTracker {
     }
 
     async loadExerciseList() {
-        // Try to load from Google Sheets first (if signed in and sheet is connected)
+        // Google Sheets is the only source of truth - no local storage
         if (this.isSignedIn && this.sheetId) {
             try {
                 // Make sure Google Sheets is initialized
                 await this.initGoogleSheets();
                 const sheetExercises = await this.loadExerciseListFromSheet();
                 if (sheetExercises && sheetExercises.length > 0) {
-                    // Save to localStorage as backup
-                    localStorage.setItem('exerciseList', JSON.stringify(sheetExercises));
                     return sheetExercises;
                 }
             } catch (error) {
-                console.warn('Error loading exercise list from sheet, falling back to localStorage:', error);
-            }
-        }
-
-        // Fall back to localStorage
-        const saved = localStorage.getItem('exerciseList');
-        if (saved) {
-            try {
-                return JSON.parse(saved);
-            } catch (e) {
-                console.error('Error parsing exercise list:', e);
+                console.warn('Error loading exercise list from sheet:', error);
             }
         }
         
-        // If no saved list, extract from existing sessions
-        const exercises = new Set();
-        if (this.sessions && this.sessions.length > 0) {
-            this.sessions.forEach(session => {
-                if (session.exercises) {
-                    session.exercises.forEach(ex => exercises.add(ex.name));
-                }
-            });
-        }
-        // Return in order found (no sorting)
-        return Array.from(exercises);
+        // Return empty if not signed in or no sheet
+        return [];
     }
 
     async saveExerciseList() {
-        // Save to localStorage
-        localStorage.setItem('exerciseList', JSON.stringify(this.exerciseList));
-        
-        // Also sync to Google Sheets if signed in
+        // All data is cloud-based - sync to Google Sheets only
         if (this.isSignedIn && this.sheetId) {
             try {
                 await this.syncExerciseListToSheet();
@@ -2102,7 +2062,8 @@ class WorkoutTracker {
         }
     }
 
-    async reconnectToSheet() {
+    // Removed - reconnect handled automatically
+    async _removed_reconnectToSheet() {
         if (!this.isSignedIn || !this.userEmail) {
             alert('Please sign in first');
             return;
@@ -2542,7 +2503,7 @@ class WorkoutTracker {
             if (this.sessions.length > 0) {
                 console.log('Sample session:', this.sessions[0]);
             }
-            this.saveSessions(); // Save to localStorage as backup
+            this.saveSessions(); // Sync to Google Sheets
             this.currentSession = this.getTodaySession();
             
             // Also load exercise list from Google Sheets
@@ -2550,7 +2511,7 @@ class WorkoutTracker {
             console.log('Sync from sheet: Loaded', sheetExercises?.length || 0, 'exercises from Exercises tab');
             if (sheetExercises && sheetExercises.length > 0) {
                 this.exerciseList = sheetExercises;
-                this.saveExerciseList(); // Save to localStorage as backup
+                this.saveExerciseList(); // Sync to Google Sheets
             } else {
                 console.warn('No exercises found in Exercises tab, will extract from sessions');
             }
@@ -2653,7 +2614,8 @@ class WorkoutTracker {
         return 'medium';
     }
 
-    exportData() {
+    // Removed - all data is cloud-based
+    _removed_exportData() {
         const dataStr = JSON.stringify(this.sessions, null, 2);
         const dataBlob = new Blob([dataStr], { type: 'application/json' });
         const url = URL.createObjectURL(dataBlob);
@@ -2664,7 +2626,8 @@ class WorkoutTracker {
         URL.revokeObjectURL(url);
     }
 
-    importData(event) {
+    // Removed - all data is cloud-based
+    _removed_importData(event) {
         const file = event.target.files[0];
         if (!file) return;
 
@@ -2689,67 +2652,47 @@ class WorkoutTracker {
         reader.readAsText(file);
     }
 
-    clearLocalData() {
-        if (confirm('Are you sure you want to clear all local data? This cannot be undone.')) {
-            localStorage.removeItem('workoutSessions');
-            this.sessions = [];
-            this.currentSession = this.getTodaySession();
-            this.renderTodayWorkout();
-            this.renderHistory();
-            alert('Local data cleared');
-        }
+    // Removed - all data is cloud-based
+    _removed_clearLocalData() {
+        // No local data to clear
     }
 
     updateSyncStatus() {
         const indicator = document.getElementById('sync-indicator');
         const text = document.getElementById('sync-text');
-        const reconnectBtn = document.getElementById('reconnect-sheet-btn');
-        
         if (this.isSignedIn && this.sheetId) {
             indicator.textContent = '🟢';
             text.textContent = 'Connected';
-            if (reconnectBtn) {
-                reconnectBtn.style.display = 'block';
-            }
         } else if (this.isSignedIn) {
             indicator.textContent = '🟡';
             text.textContent = 'Signed In';
-            if (reconnectBtn) {
-                reconnectBtn.style.display = 'block';
-            }
         } else {
             indicator.textContent = '⚪';
             text.textContent = 'Not Connected';
-            if (reconnectBtn) {
-                reconnectBtn.style.display = 'none';
-            }
         }
     }
 
     saveSessions() {
-        // Save to localStorage as backup (for offline use)
-        localStorage.setItem('workoutSessions', JSON.stringify(this.sessions));
+        // All data is cloud-based - no local storage
+        // Data is synced to Google Sheets automatically
     }
 
     async loadSessions() {
-        // Google Sheets is the source of truth - load from there first if available
+        // Google Sheets is the only source of truth - no local storage
         if (this.isSignedIn && this.sheetId) {
             try {
                 await this.initGoogleSheets();
                 const sheetSessions = await this.loadSessionsFromSheet();
                 if (sheetSessions && sheetSessions.length > 0) {
-                    // Save to localStorage as backup
-                    localStorage.setItem('workoutSessions', JSON.stringify(sheetSessions));
                     return sheetSessions;
                 }
             } catch (error) {
-                console.warn('Error loading sessions from sheet, falling back to localStorage:', error);
+                console.warn('Error loading sessions from sheet:', error);
             }
         }
         
-        // Fall back to localStorage if sheet not available or error
-        const saved = localStorage.getItem('workoutSessions');
-        return saved ? JSON.parse(saved) : [];
+        // Return empty if not signed in or no sheet
+        return [];
     }
 
     async loadSessionsFromSheet() {
