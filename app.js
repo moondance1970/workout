@@ -26,6 +26,7 @@ class WorkoutTracker {
         this.restTimer = null; // Timer interval ID
         this.restTimerSeconds = 0; // Current timer seconds
         this.restTimerDuration = 60; // Default rest time in seconds (1 minute)
+        this.tokenRequestInProgress = false; // Prevent multiple simultaneous token requests
         this.init();
     }
 
@@ -171,12 +172,34 @@ class WorkoutTracker {
     }
 
     async requestAccessToken() {
+        // Prevent multiple simultaneous token requests
+        if (this.tokenRequestInProgress) {
+            console.log('Token request already in progress, skipping...');
+            return;
+        }
+
+        // Check if we have a valid token first
+        const existingToken = localStorage.getItem('googleAccessToken');
+        const tokenExpiry = localStorage.getItem('googleTokenExpiry');
+        if (existingToken && tokenExpiry && new Date() < new Date(tokenExpiry)) {
+            // Token is still valid, use it
+            this.googleToken = existingToken;
+            this.isSignedIn = true;
+            this.updateHeaderButtons();
+            await this.loadUserInfo();
+            this.initGoogleSheets();
+            this.updateSyncStatus();
+            return;
+        }
+
         // Request OAuth2 token with proper scopes
         const clientId = await this.getClientId();
         if (!clientId) {
             alert('Google OAuth Client ID not configured. Please check your settings.');
             return;
         }
+
+        this.tokenRequestInProgress = true;
 
         const scopes = 'https://www.googleapis.com/auth/spreadsheets https://www.googleapis.com/auth/drive.readonly https://www.googleapis.com/auth/userinfo.email https://www.googleapis.com/auth/userinfo.profile';
         
@@ -185,13 +208,18 @@ class WorkoutTracker {
             client_id: clientId,
             scope: scopes,
             callback: (tokenResponse) => {
+                this.tokenRequestInProgress = false;
+                
                 if (tokenResponse.access_token) {
                     this.googleToken = tokenResponse.access_token;
-                    // Store token with expiry (subtract 5 minutes for safety)
-                    const expiry = new Date(Date.now() + (tokenResponse.expires_in - 300) * 1000);
+                    // Store token with expiry (subtract 2 minutes for safety, less conservative)
+                    const expiry = new Date(Date.now() + (tokenResponse.expires_in - 120) * 1000);
                     localStorage.setItem('googleAccessToken', this.googleToken);
                     localStorage.setItem('googleTokenExpiry', expiry.toISOString());
                     this.isSignedIn = true;
+                    
+                    // Update header buttons
+                    this.updateHeaderButtons();
                     
                     // Load user info (which will auto-connect to sheet, create if needed, and sync)
                     this.loadUserInfo().then(async () => {
@@ -209,22 +237,51 @@ class WorkoutTracker {
                         this.exerciseList = exercises;
                         this.updateExerciseList();
                     });
-                    
-                    // Update button
-                    const buttonContainer = document.getElementById('google-signin-button');
-                    buttonContainer.innerHTML = '<p style="color: green;">✓ Signed in successfully!</p>';
                 } else if (tokenResponse.error) {
-                    alert('Sign-in error: ' + tokenResponse.error);
+                    console.error('Sign-in error:', tokenResponse.error);
+                    if (tokenResponse.error !== 'popup_closed_by_user') {
+                        alert('Sign-in error: ' + tokenResponse.error);
+                    }
                 }
             },
         });
         
-        // Request token with consent to ensure we get all permissions
-        tokenClient.requestAccessToken({ prompt: 'consent' });
+        // Request token - only show consent if user hasn't authorized before
+        // Google Identity Services will automatically reuse existing consent
+        tokenClient.requestAccessToken();
     }
 
     requestAccessTokenPromise() {
         return new Promise((resolve) => {
+            // Prevent multiple simultaneous token requests
+            if (this.tokenRequestInProgress) {
+                console.log('Token request already in progress, waiting...');
+                // Wait a bit and check if token becomes available
+                setTimeout(() => {
+                    const existingToken = localStorage.getItem('googleAccessToken');
+                    const tokenExpiry = localStorage.getItem('googleTokenExpiry');
+                    if (existingToken && tokenExpiry && new Date() < new Date(tokenExpiry)) {
+                        this.googleToken = existingToken;
+                        this.isSignedIn = true;
+                        resolve(true);
+                    } else {
+                        resolve(false);
+                    }
+                }, 1000);
+                return;
+            }
+
+            // Check if we have a valid token first
+            const existingToken = localStorage.getItem('googleAccessToken');
+            const tokenExpiry = localStorage.getItem('googleTokenExpiry');
+            if (existingToken && tokenExpiry && new Date() < new Date(tokenExpiry)) {
+                // Token is still valid, use it
+                this.googleToken = existingToken;
+                this.isSignedIn = true;
+                resolve(true);
+                return;
+            }
+
             // Request OAuth2 token with proper scopes
             this.getClientId().then(clientId => {
                 if (!clientId) {
@@ -233,6 +290,8 @@ class WorkoutTracker {
                     return;
                 }
 
+                this.tokenRequestInProgress = true;
+
                 const scopes = 'https://www.googleapis.com/auth/spreadsheets https://www.googleapis.com/auth/drive.readonly https://www.googleapis.com/auth/userinfo.email https://www.googleapis.com/auth/userinfo.profile';
                 
                 // Use Google Identity Services token client
@@ -240,10 +299,12 @@ class WorkoutTracker {
                     client_id: clientId,
                     scope: scopes,
                     callback: (tokenResponse) => {
+                        this.tokenRequestInProgress = false;
+                        
                         if (tokenResponse.access_token) {
                             this.googleToken = tokenResponse.access_token;
-                            // Store token with expiry (subtract 5 minutes for safety)
-                            const expiry = new Date(Date.now() + (tokenResponse.expires_in - 300) * 1000);
+                            // Store token with expiry (subtract 2 minutes for safety, less conservative)
+                            const expiry = new Date(Date.now() + (tokenResponse.expires_in - 120) * 1000);
                             localStorage.setItem('googleAccessToken', this.googleToken);
                             localStorage.setItem('googleTokenExpiry', expiry.toISOString());
                             this.isSignedIn = true;
@@ -271,16 +332,18 @@ class WorkoutTracker {
                             resolve(true);
                         } else if (tokenResponse.error) {
                             if (tokenResponse.error !== 'popup_closed_by_user') {
-                                alert('Sign-in error: ' + tokenResponse.error);
+                                console.error('Sign-in error:', tokenResponse.error);
                             }
                             resolve(false);
                         }
                     },
                 });
                 
-                // Request token with consent to ensure we get all permissions
-                tokenClient.requestAccessToken({ prompt: 'consent' });
+                // Request token - only show consent if user hasn't authorized before
+                // Google Identity Services will automatically reuse existing consent
+                tokenClient.requestAccessToken();
             }).catch(() => {
+                this.tokenRequestInProgress = false;
                 resolve(false);
             });
         });
@@ -622,7 +685,37 @@ class WorkoutTracker {
         this.renderHistory();
     }
 
+    async ensureValidToken() {
+        // Check if token exists and is valid
+        const token = localStorage.getItem('googleAccessToken');
+        const tokenExpiry = localStorage.getItem('googleTokenExpiry');
+        
+        if (token && tokenExpiry) {
+            const expiryDate = new Date(tokenExpiry);
+            const now = new Date();
+            const timeUntilExpiry = expiryDate.getTime() - now.getTime();
+            
+            // If token is expired or will expire in less than 1 minute, refresh it
+            if (timeUntilExpiry < 60000) {
+                console.log('Token expired or near expiry, refreshing...');
+                // Token is expired or about to expire, request a new one
+                await this.requestAccessTokenPromise();
+            } else {
+                // Token is still valid
+                this.googleToken = token;
+                this.isSignedIn = true;
+            }
+        } else if (!this.googleToken) {
+            // No token at all, need to request one
+            console.log('No token found, requesting new token...');
+            await this.requestAccessTokenPromise();
+        }
+    }
+
     async initGoogleSheets() {
+        // Ensure we have a valid token before initializing
+        await this.ensureValidToken();
+        
         if (!this.googleToken || !gapi) {
             console.warn('Cannot init Google Sheets: token or gapi missing', {
                 hasToken: !!this.googleToken,
@@ -1620,7 +1713,7 @@ class WorkoutTracker {
         }
 
         let html = '';
-        filteredSessions.forEach(session => {
+        filteredSessions.forEach((session, index) => {
             const date = new Date(session.date);
             const dateStr = date.toLocaleDateString('en-US', { 
                 weekday: 'short', 
@@ -1630,7 +1723,10 @@ class WorkoutTracker {
             });
             
             html += `<div class="session-card">`;
-            html += `<div class="date">${dateStr}</div>`;
+            html += `<div class="date" style="display: flex; justify-content: space-between; align-items: center;">`;
+            html += `<span>${dateStr}</span>`;
+            html += `<button class="copy-session-btn" data-session-date="${session.date}" style="padding: 5px 10px; font-size: 12px; background: #667eea; color: white; border: none; border-radius: 5px; cursor: pointer;">📋 Copy</button>`;
+            html += `</div>`;
             
             if (session.exercises && session.exercises.length > 0) {
                 session.exercises.forEach(ex => {
@@ -1651,6 +1747,78 @@ class WorkoutTracker {
         });
         
         container.innerHTML = html;
+        
+        // Store filtered sessions for copy functionality (closure)
+        const sessionsForCopy = [...filteredSessions];
+        
+        // Add event listeners for copy buttons
+        container.querySelectorAll('.copy-session-btn').forEach(btn => {
+            btn.addEventListener('click', (e) => {
+                const sessionDate = btn.getAttribute('data-session-date');
+                const session = sessionsForCopy.find(s => s.date === sessionDate);
+                if (session) {
+                    this.copySessionToClipboard(session);
+                    
+                    // Visual feedback
+                    const originalText = btn.textContent;
+                    btn.textContent = '✓ Copied!';
+                    btn.style.background = '#4caf50';
+                    setTimeout(() => {
+                        btn.textContent = originalText;
+                        btn.style.background = '#667eea';
+                    }, 2000);
+                }
+            });
+        });
+    }
+
+    copySessionToClipboard(session) {
+        const date = new Date(session.date);
+        const dateStr = date.toLocaleDateString('en-US', { 
+            weekday: 'long', 
+            year: 'numeric', 
+            month: 'long', 
+            day: 'numeric' 
+        });
+        
+        let text = `${dateStr}\n\n`;
+        
+        if (session.exercises && session.exercises.length > 0) {
+            session.exercises.forEach((ex, index) => {
+                text += `${ex.name}\n`;
+                text += `  Weight: ${ex.weight}kg\n`;
+                text += `  Sets: ${ex.sets}\n`;
+                text += `  Reps: ${ex.reps.join(', ')}\n`;
+                if (ex.notes) {
+                    text += `  Notes: ${ex.notes}\n`;
+                }
+                if (index < session.exercises.length - 1) {
+                    text += '\n';
+                }
+            });
+        }
+        
+        // Copy to clipboard
+        navigator.clipboard.writeText(text).then(() => {
+            console.log('Session copied to clipboard');
+        }).catch(err => {
+            console.error('Failed to copy:', err);
+            // Fallback for older browsers
+            const textArea = document.createElement('textarea');
+            textArea.value = text;
+            textArea.style.position = 'fixed';
+            textArea.style.opacity = '0';
+            document.body.appendChild(textArea);
+            textArea.select();
+            try {
+                document.execCommand('copy');
+                console.log('Session copied to clipboard (fallback)');
+            } catch (err) {
+                console.error('Fallback copy failed:', err);
+                alert('Failed to copy. Please select and copy manually.');
+            }
+            document.body.removeChild(textArea);
+        });
     }
 
     async loadExerciseList() {
