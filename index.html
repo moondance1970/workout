@@ -19,7 +19,10 @@
                 <span id="sync-text">Not Connected</span>
             </div>
             <div style="margin-bottom: 15px;">
-                <button id="session-btn" style="width: auto; padding: 10px 20px; margin: 0;">New Session</button>
+                <div id="session-btn-container">
+                    <button id="session-btn" style="width: auto; padding: 10px 20px; margin: 0; display: none;">New Session</button>
+                    <div id="google-signin-button-header"></div>
+                </div>
             </div>
             <div class="nav-tabs">
                 <button class="tab-btn active" data-tab="track">Track Workout</button>
@@ -120,8 +123,6 @@
             <div class="settings-section">
                 <h3>🔐 Google Account</h3>
                 <div id="google-auth-section">
-                    <p class="settings-desc">Sign in with Google to sync your workouts across all devices</p>
-                    <div id="google-signin-button"></div>
                     <div id="user-info" style="display: none; margin-top: 15px;">
                         <p class="user-name" id="user-name"></p>
                         <button id="sign-out-btn" class="btn-secondary">Sign Out</button>
@@ -135,14 +136,6 @@
                 <div id="sheet-status" style="margin-top: 10px;"></div>
                 <div style="margin-top: 15px;">
                     <button id="reconnect-sheet-btn" class="btn-secondary" style="width: 100%;">🔄 Reconnect to Sheet</button>
-                </div>
-            </div>
-
-            <div class="settings-section">
-                <h3>🔄 Sync Actions</h3>
-                <div class="settings-buttons">
-                    <button id="sync-to-sheet-btn" class="btn-secondary">📤 Upload to Sheet</button>
-                    <button id="sync-from-sheet-btn" class="btn-secondary">📥 Download from Sheet</button>
                 </div>
             </div>
 

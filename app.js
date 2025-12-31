@@ -32,13 +32,31 @@ class WorkoutTracker {
     async init() {
         this.setupEventListeners();
         
-        // Load sessions (will try Google Sheets first if signed in)
-        this.sessions = await this.loadSessions();
-        this.currentSession = this.getTodaySession();
+        // Check if signed in before loading data
+        const token = localStorage.getItem('googleAccessToken');
+        const tokenExpiry = localStorage.getItem('googleTokenExpiry');
+        if (token && tokenExpiry && new Date() < new Date(tokenExpiry)) {
+            this.googleToken = token;
+            this.isSignedIn = true;
+        }
         
-        // Load exercise list (will try Google Sheets if signed in)
-        this.exerciseList = await this.loadExerciseList();
-        this.updateExerciseList(); // This will populate the select dropdown
+        // Only load data if signed in - keep empty until login
+        if (this.isSignedIn) {
+            // Load sessions (will try Google Sheets first if signed in)
+            this.sessions = await this.loadSessions();
+            this.currentSession = this.getTodaySession();
+            
+            // Load exercise list (will try Google Sheets if signed in)
+            this.exerciseList = await this.loadExerciseList();
+            this.updateExerciseList(); // This will populate the select dropdown
+        } else {
+            // Keep empty until login
+            this.sessions = [];
+            this.currentSession = { date: new Date().toISOString().split('T')[0], exercises: [] };
+            this.exerciseList = [];
+            this.updateExerciseList(); // This will show empty list
+        }
+        
         this.updateRepsInputs();
         this.renderTodayWorkout();
         this.renderHistory();
@@ -103,17 +121,18 @@ class WorkoutTracker {
                 this.exerciseList = await this.loadExerciseList();
                 this.updateExerciseList();
             }
-        }
-
-        // Create sign-in button
-        const buttonContainer = document.getElementById('google-signin-button');
-        if (buttonContainer) {
-            buttonContainer.innerHTML = '';
-            const signInBtn = document.createElement('button');
-            signInBtn.className = 'btn-primary';
-            signInBtn.textContent = '🔐 Sign in with Google';
-            signInBtn.onclick = () => this.requestAccessToken();
-            buttonContainer.appendChild(signInBtn);
+            
+            // Update header buttons (show session, hide login)
+            this.updateHeaderButtons();
+        } else {
+            // Not signed in - update header buttons
+            this.updateHeaderButtons();
+            
+            // Also update settings message
+            const settingsButtonContainer = document.getElementById('google-signin-button');
+            if (settingsButtonContainer) {
+                settingsButtonContainer.innerHTML = '<p class="settings-desc">Sign in with Google in the header to start a session</p>';
+            }
         }
     }
 
@@ -233,6 +252,9 @@ class WorkoutTracker {
                             localStorage.setItem('googleTokenExpiry', expiry.toISOString());
                             this.isSignedIn = true;
                             
+                            // Update header buttons (show session, hide login)
+                            this.updateHeaderButtons();
+                            
                             // Load user info (which will auto-connect to sheet, create if needed, and sync)
                             this.loadUserInfo().then(async () => {
                                 this.updateSyncStatus();
@@ -249,12 +271,6 @@ class WorkoutTracker {
                                 this.exerciseList = exercises;
                                 this.updateExerciseList();
                             });
-                            
-                            // Update button
-                            const buttonContainer = document.getElementById('google-signin-button');
-                            if (buttonContainer) {
-                                buttonContainer.innerHTML = '<p style="color: green;">✓ Signed in successfully!</p>';
-                            }
                             
                             resolve(true);
                         } else if (tokenResponse.error) {
@@ -552,6 +568,34 @@ class WorkoutTracker {
         }
     }
 
+    updateHeaderButtons() {
+        const headerButtonContainer = document.getElementById('google-signin-button-header');
+        const sessionBtn = document.getElementById('session-btn');
+        
+        if (!this.isSignedIn) {
+            // Show login button in header, hide session button
+            if (headerButtonContainer) {
+                headerButtonContainer.innerHTML = '';
+                const signInBtn = document.createElement('button');
+                signInBtn.style.cssText = 'width: auto; padding: 10px 20px; margin: 0;';
+                signInBtn.textContent = '🔐 Sign in with Google';
+                signInBtn.onclick = () => this.requestAccessToken();
+                headerButtonContainer.appendChild(signInBtn);
+            }
+            if (sessionBtn) {
+                sessionBtn.style.display = 'none';
+            }
+        } else {
+            // Hide login button, show session button
+            if (headerButtonContainer) {
+                headerButtonContainer.innerHTML = '';
+            }
+            if (sessionBtn) {
+                sessionBtn.style.display = 'block';
+            }
+        }
+    }
+
     signOut() {
         google.accounts.id.disableAutoSelect();
         if (this.googleToken) {
@@ -559,10 +603,33 @@ class WorkoutTracker {
         }
         this.googleToken = null;
         this.isSignedIn = false;
+        this.sheetId = null;
         this.userEmail = null;
         localStorage.removeItem('googleAccessToken');
+        localStorage.removeItem('googleTokenExpiry');
+        localStorage.removeItem('sheetId');
+        
+        // Clear user-specific sheet IDs
+        if (this.userEmail) {
+            this.saveSheetIdForUser(this.userEmail, null);
+        }
+        
+        // Update UI
         document.getElementById('user-info').style.display = 'none';
+        const settingsButtonContainer = document.getElementById('google-signin-button');
+        if (settingsButtonContainer) {
+            settingsButtonContainer.innerHTML = '<p class="settings-desc">Sign in with Google in the header to start a session</p>';
+        }
         this.updateSyncStatus();
+        this.updateHeaderButtons(); // Update header buttons
+        
+        // Clear data - keep empty until login
+        this.sessions = [];
+        this.currentSession = { date: new Date().toISOString().split('T')[0], exercises: [] };
+        this.exerciseList = [];
+        this.updateExerciseList();
+        this.renderTodayWorkout();
+        this.renderHistory();
     }
 
     async initGoogleSheets() {
@@ -666,8 +733,6 @@ class WorkoutTracker {
         document.getElementById('exercise-filter').addEventListener('change', () => this.renderHistory());
         document.getElementById('time-filter').addEventListener('change', () => this.renderHistory());
         document.getElementById('sign-out-btn').addEventListener('click', () => this.signOut());
-        document.getElementById('sync-to-sheet-btn').addEventListener('click', () => this.syncToSheet());
-        document.getElementById('sync-from-sheet-btn').addEventListener('click', () => this.syncFromSheet());
         const reconnectBtn = document.getElementById('reconnect-sheet-btn');
         if (reconnectBtn) {
             reconnectBtn.addEventListener('click', () => this.reconnectToSheet());
@@ -2514,7 +2579,7 @@ class WorkoutTracker {
             
             // Only show success if we actually loaded data
             if (sessionCount > 0 || exerciseCount > 0) {
-                alert(`Data synced successfully!\n\n${sessionCount} workout session(s) loaded\n${exerciseCount} exercise(s) loaded`);
+                // No alert - user will see exercises populate in the list
             } else {
                 // This shouldn't happen if the earlier check worked, but just in case
                 alert('Sync completed, but no data was found in the sheet.\n\nPlease verify:\n1. The sheet has data in the correct format\n2. The sheet exists and is accessible\n3. You have access to the sheet');
