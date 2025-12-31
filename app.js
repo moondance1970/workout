@@ -1339,6 +1339,26 @@ class WorkoutTracker {
         if (skipBtn) {
             skipBtn.style.display = 'none';
         }
+        
+        // Automatically select the first exercise from remaining list
+        this.selectFirstExercise();
+    }
+
+    selectFirstExercise() {
+        const select = document.getElementById('exercise-name');
+        if (!select) return;
+        
+        // Get the first exercise from the remaining list (skip the empty option)
+        if (select.options.length > 1) {
+            // First option is empty, so select the second one (first actual exercise)
+            const firstExercise = select.options[1];
+            if (firstExercise && firstExercise.value) {
+                select.value = firstExercise.value;
+                // Trigger change event to show recommendations
+                const event = new Event('change', { bubbles: true });
+                select.dispatchEvent(event);
+            }
+        }
     }
 
     formatDifficulty(difficulty) {
@@ -2845,6 +2865,9 @@ class WorkoutTracker {
             this.renderTodayWorkout();
             this.renderHistory();
             this.updateExerciseList();
+
+            // Automatically select the first exercise
+            this.selectFirstExercise();
 
             // Step 5: Mark session as active and update button
             this.sessionActive = true;
