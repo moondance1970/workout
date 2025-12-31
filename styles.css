@@ -209,6 +209,54 @@ textarea:focus {
     transform: translateY(0);
 }
 
+.rest-timer {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    border-radius: 15px;
+    padding: 20px;
+    margin-bottom: 20px;
+    border: 2px solid #e0e0e0;
+    color: white;
+    text-align: center;
+}
+
+.rest-timer h3 {
+    margin-bottom: 15px;
+    color: white;
+    font-size: 18px;
+}
+
+.timer-display {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    margin: 20px 0;
+}
+
+.timer-circle {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    width: 120px;
+    height: 120px;
+    border-radius: 50%;
+    background: rgba(255, 255, 255, 0.2);
+    border: 3px solid rgba(255, 255, 255, 0.5);
+}
+
+.timer-circle #timer-seconds {
+    font-size: 48px;
+    font-weight: 700;
+    color: white;
+    line-height: 1;
+}
+
+.timer-circle .timer-label {
+    font-size: 14px;
+    color: rgba(255, 255, 255, 0.9);
+    margin-top: 5px;
+}
+
 .recommendations-panel {
     background: #f8f9fa;
     border-radius: 15px;

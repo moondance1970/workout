@@ -23,6 +23,9 @@ class WorkoutTracker {
         this.exerciseList = []; // Will be loaded asynchronously
         this.userEmail = null; // Store user email for per-user sheet ID
         this.sessionActive = false; // Track if a session is currently active
+        this.restTimer = null; // Timer interval ID
+        this.restTimerSeconds = 0; // Current timer seconds
+        this.restTimerDuration = 60; // Default rest time in seconds (1 minute)
         this.init();
     }
 
@@ -673,10 +676,19 @@ class WorkoutTracker {
         document.getElementById('import-file').addEventListener('change', (e) => this.importData(e));
         document.getElementById('clear-local-btn').addEventListener('click', () => this.clearLocalData());
         document.getElementById('session-btn').addEventListener('click', () => this.handleSessionButton());
+        const skipTimerBtn = document.getElementById('skip-timer-btn');
+        if (skipTimerBtn) {
+            skipTimerBtn.addEventListener('click', () => this.stopRestTimer());
+        }
         
         // Exercise name select change handler
         document.getElementById('exercise-name').addEventListener('change', (e) => {
             const selectedExercise = e.target.value.trim();
+            
+            // Clear timer completely when a new exercise is selected
+            if (selectedExercise && selectedExercise !== '') {
+                this.stopRestTimer();
+            }
             
             // Don't hide the input field immediately - let it linger
             // Only hide if a value is actually selected (not empty)
@@ -912,6 +924,9 @@ class WorkoutTracker {
         this.renderTodayWorkout();
         this.showRecommendations(exercise);
         this.clearForm();
+        
+        // Start rest timer after saving exercise
+        this.startRestTimer();
 
         // Immediately sync to Google Sheets (sheet is source of truth)
         if (this.isSignedIn && this.sheetId) {
@@ -1216,6 +1231,114 @@ class WorkoutTracker {
 
         // All parameters match
         return true;
+    }
+
+    startRestTimer() {
+        // Stop any existing timer
+        if (this.restTimer) {
+            clearInterval(this.restTimer);
+            this.restTimer = null;
+        }
+        
+        // Reset display elements
+        const timerDisplay = document.getElementById('timer-seconds');
+        const timerLabel = document.querySelector('.timer-label');
+        const skipBtn = document.getElementById('skip-timer-btn');
+        
+        if (timerDisplay) {
+            timerDisplay.style.fontSize = '48px';
+        }
+        if (timerLabel) {
+            timerLabel.textContent = 'seconds';
+        }
+        if (skipBtn) {
+            skipBtn.style.display = 'block';
+        }
+        
+        // Set timer duration (60 seconds default, can be customized)
+        this.restTimerSeconds = this.restTimerDuration;
+        
+        // Show timer display
+        const timerContainer = document.getElementById('rest-timer');
+        if (timerContainer) {
+            timerContainer.style.display = 'block';
+        }
+        
+        // Update display immediately
+        this.updateTimerDisplay();
+        
+        // Start countdown
+        this.restTimer = setInterval(() => {
+            this.restTimerSeconds--;
+            this.updateTimerDisplay();
+            
+            if (this.restTimerSeconds <= 0) {
+                this.completeRestTimer();
+            }
+        }, 1000);
+    }
+
+    stopRestTimer() {
+        if (this.restTimer) {
+            clearInterval(this.restTimer);
+            this.restTimer = null;
+        }
+        
+        // Hide timer display
+        const timerContainer = document.getElementById('rest-timer');
+        if (timerContainer) {
+            timerContainer.style.display = 'none';
+        }
+        
+        // Reset display elements
+        const timerDisplay = document.getElementById('timer-seconds');
+        const timerLabel = document.querySelector('.timer-label');
+        const skipBtn = document.getElementById('skip-timer-btn');
+        
+        if (timerDisplay) {
+            timerDisplay.textContent = '60';
+            timerDisplay.style.fontSize = '48px';
+        }
+        if (timerLabel) {
+            timerLabel.textContent = 'seconds';
+        }
+        if (skipBtn) {
+            skipBtn.style.display = 'block';
+        }
+        
+        this.restTimerSeconds = 0;
+    }
+
+    updateTimerDisplay() {
+        const timerDisplay = document.getElementById('timer-seconds');
+        if (timerDisplay) {
+            timerDisplay.textContent = this.restTimerSeconds;
+        }
+    }
+
+    completeRestTimer() {
+        // Clear the interval but keep the timer visible
+        if (this.restTimer) {
+            clearInterval(this.restTimer);
+            this.restTimer = null;
+        }
+        
+        // Update display to show "Rest completed" message
+        const timerDisplay = document.getElementById('timer-seconds');
+        const timerLabel = document.querySelector('.timer-label');
+        if (timerDisplay) {
+            timerDisplay.textContent = '✓';
+            timerDisplay.style.fontSize = '36px';
+        }
+        if (timerLabel) {
+            timerLabel.textContent = 'Rest Completed';
+        }
+        
+        // Hide skip button since rest is complete
+        const skipBtn = document.getElementById('skip-timer-btn');
+        if (skipBtn) {
+            skipBtn.style.display = 'none';
+        }
     }
 
     formatDifficulty(difficulty) {
