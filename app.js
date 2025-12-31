@@ -821,7 +821,7 @@ class WorkoutTracker {
         // Add to exercise list if not already there
         if (!this.exerciseList.includes(exerciseName)) {
             this.exerciseList.push(exerciseName);
-            this.exerciseList.sort(); // Keep sorted alphabetically
+            // Don't sort - keep in sheet order
             this.saveExerciseList(); // Async, but fire-and-forget
             this.updateExerciseList();
         }
@@ -841,10 +841,10 @@ class WorkoutTracker {
         const newInputValue = newInput.value.trim();
         if (newInputValue && (newInput.style.display === 'block' || newInput.offsetParent !== null)) {
             exerciseName = newInputValue;
-            // Add it to the list
+            // Add it to the list (at the end, preserving order)
             if (!this.exerciseList.includes(exerciseName)) {
                 this.exerciseList.push(exerciseName);
-                this.exerciseList.sort();
+                // Don't sort - keep in sheet order
                 this.saveExerciseList(); // Async, but fire-and-forget
             }
             select.value = exerciseName;
@@ -855,7 +855,7 @@ class WorkoutTracker {
 
         const weight = parseFloat(document.getElementById('weight').value) || 0;
         const sets = parseInt(document.getElementById('sets').value) || 3;
-        const difficulty = document.getElementById('difficulty').value;
+        const difficulty = 'medium'; // Default difficulty (field removed from UI)
         const notes = document.getElementById('notes').value.trim();
 
         if (!exerciseName) {
@@ -893,11 +893,17 @@ class WorkoutTracker {
             this.sessions.push(this.currentSession);
         }
 
-        // Add exercise to list if not already there
+        // Add exercise to list if not already there (at the end, preserving order)
         if (!this.exerciseList.includes(exerciseName)) {
             this.exerciseList.push(exerciseName);
-            this.exerciseList.sort();
+            // Don't sort - keep in sheet order
             this.saveExerciseList();
+        }
+
+        // Remove exercise from list after saving (it will be repopulated when session starts/ends)
+        const exerciseIndex = this.exerciseList.indexOf(exerciseName);
+        if (exerciseIndex > -1) {
+            this.exerciseList.splice(exerciseIndex, 1);
         }
 
         // Save to localStorage first (for offline backup)
@@ -1026,15 +1032,13 @@ class WorkoutTracker {
             });
         }
         
-        // Keep difficulty and notes clear - don't prefill them
-        document.getElementById('difficulty').value = 'medium';
+        // Keep notes clear - don't prefill them
         document.getElementById('notes').value = '';
     }
 
     clearFormFields() {
         document.getElementById('weight').value = '';
         document.getElementById('sets').value = '3';
-        document.getElementById('difficulty').value = 'medium';
         document.getElementById('notes').value = '';
         this.updateRepsInputs();
     }
@@ -1050,10 +1054,14 @@ class WorkoutTracker {
 
         const lastTwo = recommendations.lastTwo;
         const suggestion = recommendations.suggestion;
+        const completedTwice = recommendations.completedTwice;
+
+        // Determine exercise name color based on completedTwice status
+        const exerciseNameColor = completedTwice ? '#4caf50' : '#f44336';
 
         let html = `
             <div class="recommendation-item ${suggestion.action}">
-                <h4>${currentExercise.name}</h4>
+                <h4 style="color: ${exerciseNameColor};">${currentExercise.name}</h4>
                 <p class="current">Current: ${currentExercise.weight}kg × ${currentExercise.reps.join(' + ')} reps (${this.formatDifficulty(currentExercise.difficulty)})</p>
         `;
 
@@ -1061,7 +1069,10 @@ class WorkoutTracker {
             html += `<p class="current">Last 2 sessions: ${lastTwo.map(e => `${e.weight}kg × ${e.reps.join(' + ')} (${this.formatDifficulty(e.difficulty)})`).join(' | ')}</p>`;
         }
 
-        if (suggestion.action === 'increase') {
+        // Show improvement recommendation if completed twice successfully
+        if (completedTwice && suggestion.action === 'increase') {
+            html += `<p class="suggestion" style="color: #4caf50; font-weight: 600;">💚 Recommendation: ${suggestion.text}</p>`;
+        } else if (suggestion.action === 'increase') {
             html += `<p class="suggestion">💚 Recommendation: ${suggestion.text}</p>`;
         } else if (suggestion.action === 'decrease') {
             html += `<p class="suggestion">🔴 Recommendation: ${suggestion.text}</p>`;
@@ -1092,6 +1103,15 @@ class WorkoutTracker {
         const sorted = allExercises.sort((a, b) => new Date(b.date) - new Date(a.date));
         const lastTwo = sorted.slice(0, 2);
 
+        // Check if exercise was completed twice with identical parameters
+        const first = lastTwo[0];
+        const second = lastTwo[1];
+        const completedTwice = 
+            first.weight === second.weight &&
+            first.sets === second.sets &&
+            first.reps.length === second.reps.length &&
+            first.reps.every((rep, index) => rep === second.reps[index]);
+
         const difficulties = lastTwo.map(e => e.difficulty);
         const bothEasy = difficulties.every(d => d === 'easy' || d === 'very-easy');
         const bothVeryHard = difficulties.every(d => d === 'very-hard');
@@ -1102,7 +1122,21 @@ class WorkoutTracker {
             text: 'Maintain current weight and reps'
         };
 
-        if (bothEasy) {
+        // If completed twice with same parameters, suggest improvement
+        if (completedTwice) {
+            const avgReps = latest.reps.reduce((a, b) => a + b, 0) / latest.reps.length;
+            if (avgReps >= 10) {
+                suggestion = {
+                    action: 'increase',
+                    text: `Great! You completed this twice successfully. Try increasing weight to ${latest.weight + 2.5}kg (or add 2.5kg)`
+                };
+            } else {
+                suggestion = {
+                    action: 'increase',
+                    text: `Great! You completed this twice successfully. Try increasing reps by 1-2 per set, or increase weight to ${latest.weight + 2.5}kg`
+                };
+            }
+        } else if (bothEasy) {
             const avgReps = latest.reps.reduce((a, b) => a + b, 0) / latest.reps.length;
             if (avgReps >= 10) {
                 suggestion = {
@@ -1129,7 +1163,59 @@ class WorkoutTracker {
             }
         }
 
-        return { lastTwo, suggestion };
+        return { lastTwo, suggestion, completedTwice };
+    }
+
+    checkExerciseCompletedTwice(exerciseName) {
+        // Find all instances of this exercise
+        const allExercises = [];
+        this.sessions.forEach(session => {
+            if (session.exercises) {
+                session.exercises.forEach(ex => {
+                    if (ex.name.toLowerCase() === exerciseName.toLowerCase()) {
+                        allExercises.push({ ...ex, date: session.date });
+                    }
+                });
+            }
+        });
+
+        // Need at least 2 instances
+        if (allExercises.length < 2) {
+            return false;
+        }
+
+        // Sort by date (most recent first)
+        const sorted = allExercises.sort((a, b) => new Date(b.date) - new Date(a.date));
+        const lastTwo = sorted.slice(0, 2);
+
+        // Compare the last two exercises
+        const first = lastTwo[0];
+        const second = lastTwo[1];
+
+        // Check if weight matches
+        if (first.weight !== second.weight) {
+            return false;
+        }
+
+        // Check if number of sets matches
+        if (first.sets !== second.sets) {
+            return false;
+        }
+
+        // Check if reps array matches (all sets must match)
+        if (first.reps.length !== second.reps.length) {
+            return false;
+        }
+
+        // Check if all reps match
+        for (let i = 0; i < first.reps.length; i++) {
+            if (first.reps[i] !== second.reps[i]) {
+                return false;
+            }
+        }
+
+        // All parameters match
+        return true;
     }
 
     formatDifficulty(difficulty) {
@@ -1411,7 +1497,8 @@ class WorkoutTracker {
                 }
             });
         }
-        return Array.from(exercises).sort();
+        // Return in order found (no sorting)
+        return Array.from(exercises);
     }
 
     async saveExerciseList() {
@@ -1563,8 +1650,8 @@ class WorkoutTracker {
             if (rows.length > 0) {
                 const exercises = rows
                     .map(row => row[0]?.trim())
-                    .filter(name => name && name.length > 0)
-                    .sort();
+                    .filter(name => name && name.length > 0);
+                // Keep exercises in the same order as they appear in the sheet (no sorting)
                 console.log('Exercises loaded from sheet:', exercises.length, exercises.slice(0, 5));
                 return exercises;
             }
@@ -1595,18 +1682,33 @@ class WorkoutTracker {
         console.log('updateExerciseList: Exercises from sessions:', Array.from(exercisesFromSessions));
         console.log('updateExerciseList: Saved exercise list:', this.exerciseList);
 
-        // Combine saved list with exercises from sessions
-        const allExercises = new Set([...this.exerciseList, ...exercisesFromSessions]);
-        this.exerciseList = Array.from(allExercises).sort();
+        // Combine saved list with exercises from sessions, preserving order
+        // Start with saved list, then add any from sessions that aren't already there
+        const allExercises = [...this.exerciseList];
+        exercisesFromSessions.forEach(ex => {
+            if (!allExercises.includes(ex)) {
+                allExercises.push(ex);
+            }
+        });
+        this.exerciseList = allExercises; // Keep in order (no sorting)
         console.log('updateExerciseList: Final exercise list:', this.exerciseList);
         this.saveExerciseList(); // Async, but fire-and-forget
 
-        // Update select dropdown
+        // Update select dropdown with color coding
         select.innerHTML = '<option value="">Select or type to add new...</option>';
         this.exerciseList.forEach(name => {
             const option = document.createElement('option');
             option.value = name;
             option.textContent = name;
+            
+            // Check if exercise was completed twice with same parameters
+            const completedTwice = this.checkExerciseCompletedTwice(name);
+            if (completedTwice) {
+                option.style.color = '#4caf50'; // Green
+            } else {
+                option.style.color = '#f44336'; // Red
+            }
+            
             select.appendChild(option);
         });
 
@@ -2610,6 +2712,9 @@ class WorkoutTracker {
             // Sync sessions and exercises from sheet
             await this.syncFromSheet();
             
+            // Reload exercise list from sheet to repopulate all exercises
+            this.exerciseList = await this.loadExerciseList();
+            
             // Reload current session (today's session)
             this.currentSession = this.getTodaySession();
             
@@ -2657,6 +2762,10 @@ class WorkoutTracker {
             // Sync back to Google Sheets
             await this.initGoogleSheets();
             await this.syncToSheet(true); // Silent sync (no alert)
+
+            // Reload exercise list from sheet to repopulate all exercises
+            this.exerciseList = await this.loadExerciseList();
+            this.updateExerciseList();
 
             // Mark session as inactive and update button
             this.sessionActive = false;

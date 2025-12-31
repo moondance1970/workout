@@ -60,6 +60,10 @@ header h1 {
     color: white;
     font-weight: 600;
     transition: all 0.3s;
+    border-radius: 10px;
+    cursor: pointer;
+    font-size: 16px;
+    padding: 10px 20px;
 }
 
 #session-btn:hover {
