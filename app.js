@@ -1785,16 +1785,17 @@ class WorkoutTracker {
         
         if (session.exercises && session.exercises.length > 0) {
             session.exercises.forEach((ex, index) => {
-                text += `${ex.name}\n`;
-                text += `  Weight: ${ex.weight}kg\n`;
-                text += `  Sets: ${ex.sets}\n`;
-                text += `  Reps: ${ex.reps.join(', ')}\n`;
+                if (ex.weight && ex.weight > 0) {
+                    // Exercise with weight
+                    text += `${ex.name}( Weight: ${ex.weight}kg, ${ex.reps.join(', ')}`;
+                } else {
+                    // Exercise without weight
+                    text += `${ex.name}(${ex.reps.join(', ')}`;
+                }
                 if (ex.notes) {
-                    text += `  Notes: ${ex.notes}\n`;
+                    text += `, Notes: ${ex.notes}`;
                 }
-                if (index < session.exercises.length - 1) {
-                    text += '\n';
-                }
+                text += ')\n';
             });
         }
         
