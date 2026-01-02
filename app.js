@@ -3164,12 +3164,16 @@ class WorkoutTracker {
                 } catch (error) {
                     // Sheet doesn't exist or is inaccessible
                     console.log('Sheet not found or inaccessible:', error);
-                    // Clear the sheet ID
+                    const oldSheetId = this.sheetId;
+                    
+                    // Clear the sheet ID from localStorage
                     if (this.userEmail) {
                         this.saveSheetIdForUser(this.userEmail, null);
                     }
                     localStorage.removeItem('sheetId');
-                    this.sheetId = null;
+                    this.sheetId = null; // Clear from memory too
+                    
+                    console.log('Cleared old sheet ID:', oldSheetId);
                     
                     // Ensure everything is cleared
                     this.sessions = [];
@@ -3178,6 +3182,18 @@ class WorkoutTracker {
                     this.renderTodayWorkout();
                     this.renderHistory();
                     this.updateExerciseList(); // Update with empty list
+                    
+                    // Try to auto-connect to create a new sheet
+                    if (this.userEmail) {
+                        await this.autoConnectSheet(this.userEmail);
+                        if (this.sheetId) {
+                            // New sheet created, sync from it
+                            await this.syncFromSheet();
+                            this.updateSyncStatus();
+                            alert('Old sheet was deleted. A new sheet has been created and connected!');
+                            return;
+                        }
+                    }
                     
                     alert('The Google Sheet was not found or is no longer accessible.\n\n' +
                           'Please reconnect to a sheet. A new sheet will be created automatically if needed.');
@@ -3264,6 +3280,23 @@ class WorkoutTracker {
                 console.log('Token explicitly set for loadSessionsFromSheet API call');
             } else {
                 console.error('gapi.client not available in loadSessionsFromSheet');
+                return null;
+            }
+            
+            // First, validate that the sheet exists
+            try {
+                await gapi.client.sheets.spreadsheets.get({
+                    spreadsheetId: this.sheetId
+                });
+            } catch (error) {
+                // Sheet doesn't exist or is inaccessible
+                console.warn('Sheet not found or inaccessible:', this.sheetId, error);
+                // Clear the sheet ID
+                if (this.userEmail) {
+                    this.saveSheetIdForUser(this.userEmail, null);
+                }
+                localStorage.removeItem('sheetId');
+                this.sheetId = null;
                 return null;
             }
             
