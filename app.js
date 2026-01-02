@@ -409,94 +409,29 @@ class WorkoutTracker {
                 const matchingSheets = await this.findSheetByName(defaultSheetName);
                 
                 if (matchingSheets.length === 0) {
-                    // No sheet found - ask user what to do
-                    const userChoice = confirm(
-                        `No '${defaultSheetName}' sheet found. Would you like to:\n\n` +
-                        `Click OK to create a new sheet named '${defaultSheetName}'\n` +
-                        `Click Cancel to enter a sheet name manually`
-                    );
-                    
-                    if (userChoice) {
-                        // User chose to create new sheet
-                        try {
-                            userSheetId = await this.createNewSheet(defaultSheetName);
-                            if (userSheetId) {
-                                this.saveSheetIdForUser(userEmail, userSheetId);
-                                localStorage.setItem('sheetId', userSheetId);
-                                
-                                const sheetStatus = document.getElementById('sheet-status');
-                                if (sheetStatus) {
-                                    sheetStatus.innerHTML = `<p style="color: green;">✓ Created and connected to '${defaultSheetName}'</p>`;
-                                }
-                                
-                                // Complete the connection process
-                                await this.completeSheetConnection(userSheetId);
-                            }
-                        } catch (error) {
-                            console.error('Error creating new sheet:', error);
-                            const sheetStatus = document.getElementById('sheet-status');
-                            if (sheetStatus) {
-                                sheetStatus.innerHTML = '<p style="color: red;">Error creating sheet. Please try again.</p>';
-                            }
-                            return;
-                        }
-                    } else {
-                        // User chose to enter name manually
-                        const manualName = prompt('Enter the name of your workout sheet:');
-                        if (manualName && manualName.trim()) {
-                            const trimmedName = manualName.trim();
-                            const manualSheets = await this.findSheetByName(trimmedName);
+                    // No sheet found - automatically create a new sheet
+                    console.log(`No '${defaultSheetName}' sheet found. Creating new sheet automatically...`);
+                    try {
+                        userSheetId = await this.createNewSheet(defaultSheetName);
+                        if (userSheetId) {
+                            this.saveSheetIdForUser(userEmail, userSheetId);
+                            localStorage.setItem('sheetId', userSheetId);
                             
-                            if (manualSheets.length === 0) {
-                                // Not found - create it
-                                try {
-                                    userSheetId = await this.createNewSheet(trimmedName);
-                                    if (userSheetId) {
-                                        this.saveSheetIdForUser(userEmail, userSheetId);
-                                        localStorage.setItem('sheetId', userSheetId);
-                                        
-                                        const sheetStatus = document.getElementById('sheet-status');
-                                        if (sheetStatus) {
-                                            sheetStatus.innerHTML = `<p style="color: green;">✓ Created and connected to '${trimmedName}'</p>`;
-                                        }
-                                        
-                                        // Complete the connection process
-                                        await this.completeSheetConnection(userSheetId);
-                                    }
-                                } catch (error) {
-                                    console.error('Error creating sheet:', error);
-                                    const sheetStatus = document.getElementById('sheet-status');
-                                    if (sheetStatus) {
-                                        sheetStatus.innerHTML = '<p style="color: red;">Error creating sheet. Please try again.</p>';
-                                    }
-                                    return;
-                                }
-                            } else if (manualSheets.length === 1) {
-                                // Found exactly one - use it
-                                userSheetId = manualSheets[0].id;
-                                this.saveSheetIdForUser(userEmail, userSheetId);
-                                localStorage.setItem('sheetId', userSheetId);
-                                
-                                const sheetStatus = document.getElementById('sheet-status');
-                                if (sheetStatus) {
-                                    sheetStatus.innerHTML = `<p style="color: green;">✓ Connected to '${trimmedName}'</p>`;
-                                }
-                                
-                                // Complete the connection process
-                                await this.completeSheetConnection(userSheetId);
-                            } else {
-                                // Multiple matches - let user choose
-                                await this.handleMultipleSheetMatches(manualSheets, userEmail);
-                                return; // handleMultipleSheetMatches will handle connection
-                            }
-                        } else {
-                            // User cancelled
                             const sheetStatus = document.getElementById('sheet-status');
                             if (sheetStatus) {
-                                sheetStatus.innerHTML = '<p style="color: #666;">Please connect to a sheet to sync your data.</p>';
+                                sheetStatus.innerHTML = `<p style="color: green;">✓ Created and connected to '${defaultSheetName}'</p>`;
                             }
-                            return;
+                            
+                            // Complete the connection process
+                            await this.completeSheetConnection(userSheetId);
                         }
+                    } catch (error) {
+                        console.error('Error creating new sheet:', error);
+                        const sheetStatus = document.getElementById('sheet-status');
+                        if (sheetStatus) {
+                            sheetStatus.innerHTML = '<p style="color: red;">Error creating sheet. Please try again.</p>';
+                        }
+                        return;
                     }
                 } else if (matchingSheets.length === 1) {
                     // Found exactly one - use it automatically
@@ -600,7 +535,7 @@ class WorkoutTracker {
                 range: 'Sheet1!A1:G1',
                 valueInputOption: 'RAW',
                 resource: {
-                    values: [['Date', 'Exercise', 'Weight', 'Sets', 'Reps', 'Difficulty', 'Notes']]
+                    values: [['Date', 'Exercise', 'Set', 'Reps', 'Weight (kg)', 'Difficulty', 'Notes']]
                 }
             });
             
@@ -939,8 +874,12 @@ class WorkoutTracker {
             const group = document.createElement('div');
             group.className = 'rep-input-group';
             group.innerHTML = `
-                <label>Set ${i} reps:</label>
-                <input type="number" class="rep-input" data-set="${i}" placeholder="0" min="0" value="0">
+                <label>Set ${i}:</label>
+                <div style="display: flex; gap: 10px; align-items: center;">
+                    <input type="number" class="rep-input" data-set="${i}" placeholder="Reps" min="0" value="0" style="width: 80px;">
+                    <span>×</span>
+                    <input type="number" class="weight-input" data-set="${i}" placeholder="Weight (kg)" min="0" step="0.5" value="0" style="width: 100px;">
+                </div>
             `;
             container.appendChild(group);
         }
@@ -1007,7 +946,6 @@ class WorkoutTracker {
             this.updateExerciseList();
         }
 
-        const weight = parseFloat(document.getElementById('weight').value) || 0;
         const sets = parseInt(document.getElementById('sets').value) || 3;
         const difficulty = 'medium'; // Default difficulty (field removed from UI)
         const notes = document.getElementById('notes').value.trim();
@@ -1018,13 +956,17 @@ class WorkoutTracker {
         }
 
         const reps = [];
+        const weights = [];
         document.querySelectorAll('.rep-input').forEach(input => {
             reps.push(parseInt(input.value) || 0);
+        });
+        document.querySelectorAll('.weight-input').forEach(input => {
+            weights.push(parseFloat(input.value) || 0);
         });
 
         const exercise = {
             name: exerciseName,
-            weight: weight,
+            weights: weights, // Array of weights, one per set
             sets: sets,
             reps: reps,
             difficulty: difficulty,
@@ -1143,11 +1085,14 @@ class WorkoutTracker {
         const daysAgo = Math.floor((new Date() - lastDate) / (1000 * 60 * 60 * 24));
         const daysAgoText = daysAgo === 0 ? 'Today' : daysAgo === 1 ? 'Yesterday' : `${daysAgo} days ago`;
 
+        const lastWeights = lastExercise.weights || (lastExercise.weight ? Array(lastExercise.reps.length).fill(lastExercise.weight) : []);
+        const weightStr = lastWeights.map((w, i) => `${lastExercise.reps[i] || 0} reps × ${w || 0}kg`).join(', ');
+        
         let html = `
             <div class="recommendation-item">
                 <h4>${exerciseName}</h4>
                 <p class="current"><strong>Last time:</strong> ${dateStr} (${daysAgoText})</p>
-                <p class="current">${lastExercise.weight}kg × ${lastExercise.sets} sets (${lastExercise.reps.join(', ')}) reps | ${this.formatDifficulty(lastExercise.difficulty)}</p>
+                <p class="current">${weightStr} | ${this.formatDifficulty(lastExercise.difficulty)}</p>
         `;
 
         // Get recommendations if we have 2+ sessions
@@ -1170,21 +1115,24 @@ class WorkoutTracker {
     }
 
     populateFormFromLastExercise(lastExercise) {
-        // Set weight
-        document.getElementById('weight').value = lastExercise.weight || '';
-        
         // Set sets (this will trigger updateRepsInputs)
         document.getElementById('sets').value = lastExercise.sets || 3;
         
         // Update reps inputs first (creates the right number of inputs)
         this.updateRepsInputs();
         
-        // Then populate each rep input
+        // Then populate each rep input and weight input
         const repInputs = document.querySelectorAll('.rep-input');
+        const weightInputs = document.querySelectorAll('.weight-input');
+        const weights = lastExercise.weights || (lastExercise.weight ? Array(lastExercise.reps.length).fill(lastExercise.weight) : []);
+        
         if (lastExercise.reps && lastExercise.reps.length > 0) {
             lastExercise.reps.forEach((rep, index) => {
                 if (repInputs[index]) {
                     repInputs[index].value = rep || 0;
+                }
+                if (weightInputs[index]) {
+                    weightInputs[index].value = weights[index] || 0;
                 }
             });
         }
@@ -1263,8 +1211,11 @@ class WorkoutTracker {
         // Check if exercise was completed twice with identical parameters
         const first = lastTwo[0];
         const second = lastTwo[1];
+        const firstWeights = first.weights || (first.weight ? Array(first.reps.length).fill(first.weight) : []);
+        const secondWeights = second.weights || (second.weight ? Array(second.reps.length).fill(second.weight) : []);
         const completedTwice = 
-            first.weight === second.weight &&
+            firstWeights.length === secondWeights.length &&
+            firstWeights.every((w, i) => w === secondWeights[i]) &&
             first.sets === second.sets &&
             first.reps.length === second.reps.length &&
             first.reps.every((rep, index) => rep === second.reps[index]);
@@ -1279,18 +1230,22 @@ class WorkoutTracker {
             text: 'Maintain current weight and reps'
         };
 
+        // Get average weight for recommendations
+        const latestWeights = latest.weights || (latest.weight ? Array(latest.reps.length).fill(latest.weight) : []);
+        const avgWeight = latestWeights.length > 0 ? latestWeights.reduce((a, b) => a + b, 0) / latestWeights.length : (latest.weight || 0);
+        
         // If completed twice with same parameters, suggest improvement
         if (completedTwice) {
             const avgReps = latest.reps.reduce((a, b) => a + b, 0) / latest.reps.length;
             if (avgReps >= 10) {
                 suggestion = {
                     action: 'increase',
-                    text: `Great! You completed this twice successfully. Try increasing weight to ${latest.weight + 2.5}kg (or add 2.5kg)`
+                    text: `Great! You completed this twice successfully. Try increasing weight to ${avgWeight + 2.5}kg (or add 2.5kg)`
                 };
             } else {
                 suggestion = {
                     action: 'increase',
-                    text: `Great! You completed this twice successfully. Try increasing reps by 1-2 per set, or increase weight to ${latest.weight + 2.5}kg`
+                    text: `Great! You completed this twice successfully. Try increasing reps by 1-2 per set, or increase weight to ${avgWeight + 2.5}kg`
                 };
             }
         } else if (bothEasy) {
@@ -1298,19 +1253,19 @@ class WorkoutTracker {
             if (avgReps >= 10) {
                 suggestion = {
                     action: 'increase',
-                    text: `Increase weight to ${latest.weight + 2.5}kg (or add 2.5kg)`
+                    text: `Increase weight to ${avgWeight + 2.5}kg (or add 2.5kg)`
                 };
             } else {
                 suggestion = {
                     action: 'increase',
-                    text: `Increase reps by 1-2 per set, or increase weight to ${latest.weight + 2.5}kg`
+                    text: `Increase reps by 1-2 per set, or increase weight to ${avgWeight + 2.5}kg`
                 };
             }
         } else if (bothVeryHard) {
-            if (latest.weight > 2.5) {
+            if (avgWeight > 2.5) {
                 suggestion = {
                     action: 'decrease',
-                    text: `Decrease weight to ${latest.weight - 2.5}kg`
+                    text: `Decrease weight to ${avgWeight - 2.5}kg`
                 };
             } else {
                 suggestion = {
@@ -1523,11 +1478,13 @@ class WorkoutTracker {
 
         let html = '';
         this.currentSession.exercises.forEach((exercise, index) => {
+            const weights = exercise.weights || (exercise.weight ? Array(exercise.reps.length).fill(exercise.weight) : []);
+            const weightDetails = weights.map((w, i) => `Set ${i + 1}: ${exercise.reps[i] || 0} reps × ${w || 0}kg`).join(', ');
+            
             html += `
                 <div class="exercise-card">
                     <h4>${exercise.name}</h4>
-                    <div class="details">Weight: ${exercise.weight}kg</div>
-                    <div class="details">Sets: ${exercise.sets} × ${exercise.reps.join(', ')} reps</div>
+                    <div class="details">${weightDetails}</div>
                     <div class="details">Difficulty: ${this.formatDifficulty(exercise.difficulty)}</div>
                     ${exercise.notes ? `<div class="details">Notes: ${exercise.notes}</div>` : ''}
                 </div>
@@ -1579,10 +1536,12 @@ class WorkoutTracker {
                         if (!exerciseData[ex.name]) {
                             exerciseData[ex.name] = [];
                         }
-                        const totalVolume = ex.weight * ex.reps.reduce((a, b) => a + b, 0);
+                        const weights = ex.weights || (ex.weight ? Array(ex.reps.length).fill(ex.weight) : []);
+                        const totalVolume = weights.reduce((sum, w, i) => sum + (w * (ex.reps[i] || 0)), 0);
+                        const avgWeight = weights.length > 0 ? weights.reduce((a, b) => a + b, 0) / weights.length : 0;
                         exerciseData[ex.name].push({
                             date: session.date,
-                            weight: ex.weight,
+                            weight: avgWeight,
                             volume: totalVolume,
                             reps: ex.reps.reduce((a, b) => a + b, 0)
                         });
@@ -1730,11 +1689,14 @@ class WorkoutTracker {
             
             if (session.exercises && session.exercises.length > 0) {
                 session.exercises.forEach(ex => {
+                    const weights = ex.weights || (ex.weight ? Array(ex.reps.length).fill(ex.weight) : []);
+                    const weightStr = weights.map((w, i) => `${ex.reps[i] || 0}×${w || 0}kg`).join(', ');
+                    
                     html += `
                         <div class="exercise-item">
                             <div class="exercise-name">${ex.name}</div>
                             <div class="exercise-details">
-                                ${ex.weight}kg × ${ex.sets} sets (${ex.reps.join(', ')}) | 
+                                ${weightStr} | 
                                 ${this.formatDifficulty(ex.difficulty)}
                                 ${ex.notes ? ` | ${ex.notes}` : ''}
                             </div>
@@ -1785,13 +1747,22 @@ class WorkoutTracker {
         
         if (session.exercises && session.exercises.length > 0) {
             session.exercises.forEach((ex, index) => {
-                if (ex.weight && ex.weight > 0) {
-                    // Exercise with weight
-                    text += `${ex.name}( Weight: ${ex.weight}kg, ${ex.reps.join(', ')}`;
-                } else {
-                    // Exercise without weight
-                    text += `${ex.name}(${ex.reps.join(', ')}`;
+                const weights = ex.weights || (ex.weight ? Array(ex.reps.length).fill(ex.weight) : Array(ex.reps.length).fill(0));
+                const reps = ex.reps || [];
+                
+                // Format as: Exercise Name (Set 1: 10 reps × 50kg, Set 2: 8 reps × 45kg, ...)
+                const setStrings = [];
+                for (let i = 0; i < reps.length; i++) {
+                    if (reps[i] > 0) {
+                        if (weights[i] && weights[i] > 0) {
+                            setStrings.push(`Set ${i + 1}: ${reps[i]} reps × ${weights[i]}kg`);
+                        } else {
+                            setStrings.push(`Set ${i + 1}: ${reps[i]} reps`);
+                        }
+                    }
                 }
+                
+                text += `${ex.name}(${setStrings.join(', ')}`;
                 if (ex.notes) {
                     text += `, Notes: ${ex.notes}`;
                 }
@@ -2370,20 +2341,27 @@ class WorkoutTracker {
             const escapedTabName = this.escapeSheetTabName(sheetTabName);
             
             // Convert sessions to sheet format
-            const rows = [['Date', 'Exercise', 'Weight', 'Sets', 'Reps', 'Difficulty', 'Notes']];
+            const rows = [['Date', 'Exercise', 'Set', 'Reps', 'Weight (kg)', 'Difficulty', 'Notes']];
             
             this.sessions.forEach(session => {
                 if (session.exercises) {
                     session.exercises.forEach(ex => {
-                        rows.push([
-                            session.date,
-                            ex.name,
-                            ex.weight.toString(),
-                            ex.sets.toString(),
-                            ex.reps.join('+'),
-                            this.formatDifficulty(ex.difficulty),
-                            ex.notes || ''
-                        ]);
+                        // Create one row per set
+                        const numSets = ex.sets || (ex.reps ? ex.reps.length : 0);
+                        const weights = ex.weights || (ex.weight ? Array(numSets).fill(ex.weight) : Array(numSets).fill(0));
+                        const reps = ex.reps || [];
+                        
+                        for (let i = 0; i < numSets; i++) {
+                            rows.push([
+                                session.date,
+                                ex.name,
+                                (i + 1).toString(), // Set number
+                                (reps[i] || 0).toString(),
+                                (weights[i] || 0).toString(),
+                                this.formatDifficulty(ex.difficulty),
+                                i === 0 ? (ex.notes || '') : '' // Only show notes on first set
+                            ]);
+                        }
                     });
                 }
             });
@@ -2600,7 +2578,45 @@ class WorkoutTracker {
                 return;
             }
             
+            // Detect format by checking header row or first data row structure
+            let isOldFormat = false;
+            try {
+                if (gapi.client) {
+                    gapi.client.setToken({ access_token: this.googleToken });
+                }
+                const headerResponse = await gapi.client.sheets.spreadsheets.values.get({
+                    spreadsheetId: this.sheetId,
+                    range: `${escapedTabName}!A1:G1`
+                });
+                const headerRow = headerResponse.result.values?.[0];
+                if (headerRow && headerRow.length >= 3) {
+                    // Check if column 2 is "Exercise" and column 3 is "Weight" (old format)
+                    // vs column 2 is "Exercise" and column 3 is "Set" (new format)
+                    const col2 = (headerRow[2] || '').toString().toLowerCase();
+                    if (col2.includes('weight') && !col2.includes('set')) {
+                        isOldFormat = true;
+                        console.log('Detected old sheet format (Weight, Sets, Reps)');
+                    } else {
+                        console.log('Detected new sheet format (Set, Reps, Weight)');
+                    }
+                }
+            } catch (e) {
+                console.log('Could not detect format from header, will try to infer from data:', e);
+                // Try to infer from first data row - if column 3 is a number > 10, it's likely weight (old format)
+                // If column 3 is 1, 2, 3, etc., it's likely set number (new format)
+                if (rows.length > 0 && rows[0] && rows[0].length >= 3) {
+                    const col2Value = rows[0][2];
+                    const numValue = parseFloat(col2Value);
+                    if (!isNaN(numValue) && numValue > 10) {
+                        isOldFormat = true;
+                        console.log('Inferred old format from data (column 3 is weight > 10)');
+                    }
+                }
+            }
+            
             const newSessions = {};
+            // Group exercises by date and name to combine sets
+            const exerciseGroups = {};
 
             rows.forEach((row, index) => {
                 // Skip empty rows
@@ -2622,21 +2638,92 @@ class WorkoutTracker {
                         return;
                     }
                     
-                    const exercise = {
-                        name: exerciseName,
-                        weight: parseFloat(row[2]) || 0,
-                        sets: parseInt(row[3]) || 1,
-                        reps: row[4] ? row[4].toString().split('+').map(r => parseInt(r.trim()) || 0).filter(r => r > 0) : [0],
-                        difficulty: this.parseDifficulty(row[5] || 'medium'),
-                        notes: (row[6] || '').trim(),
-                        timestamp: new Date().toISOString()
-                    };
-
-                    if (!newSessions[date]) {
-                        newSessions[date] = { date, exercises: [] };
+                    let setNum, reps, weight, difficulty, notes;
+                    
+                    if (isOldFormat) {
+                        // Old format: Date, Exercise, Weight, Sets, Reps, Difficulty, Notes
+                        weight = parseFloat(row[2]) || 0;
+                        const sets = parseInt(row[3]) || 1;
+                        const repsStr = row[4] ? row[4].toString() : '';
+                        const repsArray = repsStr.split('+').map(r => parseInt(r.trim()) || 0).filter(r => r > 0);
+                        difficulty = this.parseDifficulty(row[5] || 'medium');
+                        notes = (row[6] || '').trim();
+                        
+                        // Create a key for grouping exercises
+                        const key = `${date}|${exerciseName}`;
+                        
+                        if (!exerciseGroups[key]) {
+                            exerciseGroups[key] = {
+                                date: date,
+                                name: exerciseName,
+                                sets: [],
+                                reps: [],
+                                weights: [],
+                                difficulty: difficulty,
+                                notes: notes,
+                                timestamp: new Date().toISOString()
+                            };
+                        }
+                        
+                        // Add each set's data (old format had all sets in one row)
+                        repsArray.forEach((rep, i) => {
+                            exerciseGroups[key].sets.push(i + 1);
+                            exerciseGroups[key].reps.push(rep);
+                            exerciseGroups[key].weights.push(weight); // Same weight for all sets in old format
+                        });
+                    } else {
+                        // New format: Date, Exercise, Set, Reps, Weight (kg), Difficulty, Notes
+                        setNum = parseInt(row[2]) || 1;
+                        reps = parseInt(row[3]) || 0;
+                        weight = parseFloat(row[4]) || 0;
+                        difficulty = this.parseDifficulty(row[5] || 'medium');
+                        notes = (row[6] || '').trim();
+                        
+                        // Create a key for grouping exercises
+                        const key = `${date}|${exerciseName}`;
+                        
+                        if (!exerciseGroups[key]) {
+                            exerciseGroups[key] = {
+                                date: date,
+                                name: exerciseName,
+                                sets: [],
+                                reps: [],
+                                weights: [],
+                                difficulty: difficulty,
+                                notes: notes,
+                                timestamp: new Date().toISOString()
+                            };
+                        }
+                        
+                        // Add this set's data
+                        exerciseGroups[key].sets.push(setNum);
+                        exerciseGroups[key].reps.push(reps);
+                        exerciseGroups[key].weights.push(weight);
+                        // Keep the first set's notes
+                        if (notes && !exerciseGroups[key].notes) {
+                            exerciseGroups[key].notes = notes;
+                        }
                     }
-                    newSessions[date].exercises.push(exercise);
                 }
+            });
+
+            // Convert grouped exercises to session format
+            Object.values(exerciseGroups).forEach(ex => {
+                if (!newSessions[ex.date]) {
+                    newSessions[ex.date] = { date: ex.date, exercises: [] };
+                }
+                
+                const exercise = {
+                    name: ex.name,
+                    weights: ex.weights,
+                    sets: ex.sets.length,
+                    reps: ex.reps,
+                    difficulty: ex.difficulty,
+                    notes: ex.notes,
+                    timestamp: ex.timestamp
+                };
+                
+                newSessions[ex.date].exercises.push(exercise);
             });
 
             // Google Sheets is source of truth - replace local data with sheet data
@@ -2653,9 +2740,9 @@ class WorkoutTracker {
                 errorDetails += 'Expected format:\n';
                 errorDetails += 'Column A: Date (YYYY-MM-DD)\n';
                 errorDetails += 'Column B: Exercise Name\n';
-                errorDetails += 'Column C: Weight\n';
-                errorDetails += 'Column D: Sets\n';
-                errorDetails += 'Column E: Reps (e.g., "10+8+6")\n';
+                errorDetails += 'Column C: Set Number\n';
+                errorDetails += 'Column D: Reps\n';
+                errorDetails += 'Column E: Weight (kg)\n';
                 errorDetails += 'Column F: Difficulty\n';
                 errorDetails += 'Column G: Notes (optional)\n\n';
                 if (sampleRow) {
