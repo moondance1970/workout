@@ -3032,8 +3032,6 @@ class WorkoutTracker {
             if (text) text.textContent = 'Connected';
             if (refreshBtn) {
                 refreshBtn.style.display = 'inline-block';
-                // Re-attach event listener in case button was recreated
-                refreshBtn.onclick = () => this.refreshDataFromSheet();
             }
         } else if (this.isSignedIn) {
             if (indicator) indicator.textContent = '🟡';
