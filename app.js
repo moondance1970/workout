@@ -49,13 +49,13 @@ class WorkoutTracker {
             
             // Load exercise list (will try Google Sheets if signed in)
             this.exerciseList = await this.loadExerciseList();
-            this.updateExerciseList(); // This will populate the select dropdown
+            this.updateExerciseList(true); // Skip save during initial load - just reading
         } else {
             // Keep empty until login
             this.sessions = [];
             this.currentSession = { date: new Date().toISOString().split('T')[0], exercises: [] };
             this.exerciseList = [];
-            this.updateExerciseList(); // This will show empty list
+            this.updateExerciseList(true); // Skip save - no data to save
         }
         
         this.updateRepsInputs();
@@ -810,11 +810,6 @@ class WorkoutTracker {
             document.getElementById('exercise-name-new').style.display = 'block';
         });
         
-        // Refresh data button
-        const refreshBtn = document.getElementById('refresh-data-btn');
-        if (refreshBtn) {
-            refreshBtn.addEventListener('click', () => this.refreshDataFromSheet());
-        }
     }
 
     setupTabs() {
@@ -2008,7 +2003,7 @@ class WorkoutTracker {
         return null;
     }
 
-    updateExerciseList() {
+    updateExerciseList(skipSave = false) {
         const select = document.getElementById('exercise-name');
         if (!select) {
             console.error('Exercise name select element not found');
@@ -2036,9 +2031,16 @@ class WorkoutTracker {
                 allExercises.push(ex);
             }
         });
+        
+        // Only update and save if the list actually changed
+        const listChanged = JSON.stringify(this.exerciseList) !== JSON.stringify(allExercises);
         this.exerciseList = allExercises; // Keep in order (no sorting)
         console.log('updateExerciseList: Final exercise list:', this.exerciseList);
-        this.saveExerciseList(); // Async, but fire-and-forget
+        
+        // Only save to sheet if list changed and we're not in read-only mode
+        if (!skipSave && listChanged) {
+            this.saveExerciseList(); // Async, but fire-and-forget
+        }
 
         // Update select dropdown with color coding
         select.innerHTML = '<option value="">Select or type to add new...</option>';
@@ -2928,7 +2930,8 @@ class WorkoutTracker {
             if (this.sessions.length > 0) {
                 console.log('Sample session:', this.sessions[0]);
             }
-            this.saveSessions(); // Sync to Google Sheets
+            // Don't save sessions back during syncFromSheet - we're just reading from the sheet
+            // this.saveSessions(); // Removed - syncFromSheet is read-only
             this.currentSession = this.getTodaySession();
             
             // Also load exercise list from Google Sheets
@@ -2936,7 +2939,7 @@ class WorkoutTracker {
             console.log('Sync from sheet: Loaded', sheetExercises?.length || 0, 'exercises from Exercises tab');
             if (sheetExercises && sheetExercises.length > 0) {
                 this.exerciseList = sheetExercises;
-                this.saveExerciseList(); // Sync to Google Sheets
+                // Don't save back - we're just reading from the sheet
             } else {
                 console.warn('No exercises found in Exercises tab, will extract from sessions');
                 // If Exercises tab is empty, clear the exercise list
@@ -2944,7 +2947,8 @@ class WorkoutTracker {
             }
             
             // Always update exercise list (it will merge with exercises from sessions)
-            this.updateExerciseList();
+            // Skip save during syncFromSheet to avoid modifying the sheet when just reading
+            this.updateExerciseList(true); // true = skip save, we're just reading
             console.log('Exercise list updated in dropdown. Final count:', this.exerciseList.length);
             
             // Force re-render everything
@@ -3087,26 +3091,16 @@ class WorkoutTracker {
     updateSyncStatus() {
         const indicator = document.getElementById('sync-indicator');
         const text = document.getElementById('sync-text');
-        const refreshBtn = document.getElementById('refresh-data-btn');
         
         if (this.isSignedIn && this.sheetId) {
             if (indicator) indicator.textContent = '🟢';
             if (text) text.textContent = 'Connected';
-            if (refreshBtn) {
-                refreshBtn.style.display = 'inline-block';
-            }
         } else if (this.isSignedIn) {
             if (indicator) indicator.textContent = '🟡';
             if (text) text.textContent = 'Signed In';
-            if (refreshBtn) {
-                refreshBtn.style.display = 'none';
-            }
         } else {
             if (indicator) indicator.textContent = '⚪';
             if (text) text.textContent = 'Not Connected';
-            if (refreshBtn) {
-                refreshBtn.style.display = 'none';
-            }
         }
     }
     
@@ -3187,9 +3181,44 @@ class WorkoutTracker {
                         gapi.client.setToken({ access_token: this.googleToken });
                     }
                     // Try to access the sheet to see if it exists
-                    await gapi.client.sheets.spreadsheets.get({
+                    const sheetInfo = await gapi.client.sheets.spreadsheets.get({
                         spreadsheetId: this.sheetId
                     });
+                    
+                    const sheetTitle = sheetInfo.result?.properties?.title || '';
+                    console.log('Current sheet:', sheetTitle);
+                    
+                    // Check if sheet name contains ".old" - offer to create new one
+                    if (sheetTitle.toLowerCase().includes('.old') || sheetTitle.toLowerCase().includes('old')) {
+                        const createNew = confirm(
+                            `You're currently connected to: "${sheetTitle}"\n\n` +
+                            `Would you like to disconnect and create a fresh new sheet?\n\n` +
+                            `Click OK to create a new sheet, or Cancel to keep using the current one.`
+                        );
+                        
+                        if (createNew) {
+                            // Clear the old sheet ID
+                            const oldSheetId = this.sheetId;
+                            if (this.userEmail) {
+                                this.saveSheetIdForUser(this.userEmail, null);
+                            }
+                            localStorage.removeItem('sheetId');
+                            this.sheetId = null;
+                            
+                            // Create new sheet
+                            if (this.userEmail) {
+                                await this.autoConnectSheet(this.userEmail);
+                                if (this.sheetId) {
+                                    // New sheet created, sync from it
+                                    await this.syncFromSheet();
+                                    this.updateSyncStatus();
+                                    this.updateHeaderButtons();
+                                    alert('Disconnected from old sheet. A new sheet has been created and connected!');
+                                    return;
+                                }
+                            }
+                        }
+                    }
                     
                     // Sheet exists, clear Exercises tab first, then sync from it
                     await this.clearExercisesTab();
@@ -3332,7 +3361,43 @@ class WorkoutTracker {
                 const sheetInfo = await gapi.client.sheets.spreadsheets.get({
                     spreadsheetId: this.sheetId
                 });
-                console.log('Sheet validation passed:', this.sheetId, 'Title:', sheetInfo.result?.properties?.title);
+                const sheetTitle = sheetInfo.result?.properties?.title || '';
+                console.log('Sheet validation passed:', this.sheetId, 'Title:', sheetTitle);
+                
+                // Check if sheet name contains ".old" - user might want to start fresh
+                if (sheetTitle.toLowerCase().includes('.old') || sheetTitle.toLowerCase().includes('old')) {
+                    console.warn('Detected old sheet name, prompting user to create new sheet');
+                    const createNew = confirm(
+                        `You're connected to an old sheet: "${sheetTitle}"\n\n` +
+                        `Would you like to create a fresh new sheet instead?\n\n` +
+                        `Click OK to create a new sheet, or Cancel to keep using the old one.`
+                    );
+                    
+                    if (createNew) {
+                        // Clear the old sheet ID
+                        const oldSheetId = this.sheetId;
+                        if (this.userEmail) {
+                            this.saveSheetIdForUser(this.userEmail, null);
+                        }
+                        localStorage.removeItem('sheetId');
+                        this.sheetId = null;
+                        
+                        // Clear all data
+                        this.sessions = [];
+                        this.exerciseList = [];
+                        this.currentSession = { date: new Date().toISOString().split('T')[0], exercises: [] };
+                        
+                        // Create new sheet
+                        if (this.userEmail) {
+                            await this.autoConnectSheet(this.userEmail);
+                            if (this.sheetId) {
+                                console.log('Created new sheet:', this.sheetId);
+                                // Return null so it will load from the new sheet
+                                return null;
+                            }
+                        }
+                    }
+                }
             } catch (error) {
                 // Sheet doesn't exist or is inaccessible
                 const errorCode = error.result?.error?.code;
