@@ -1121,15 +1121,37 @@ class WorkoutTracker {
     }
 
     populateFormFromLastExercise(lastExercise) {
+        // Debug logging
+        console.log('populateFormFromLastExercise called with:', {
+            name: lastExercise.name,
+            sets: lastExercise.sets,
+            setsType: typeof lastExercise.sets,
+            isArray: Array.isArray(lastExercise.sets),
+            reps: lastExercise.reps,
+            repsLength: lastExercise.reps?.length,
+            weights: lastExercise.weights,
+            weightsLength: lastExercise.weights?.length
+        });
+        
         // Ensure sets is a number, not an array
         let numSets = 3;
         if (Array.isArray(lastExercise.sets)) {
             numSets = lastExercise.sets.length;
+            console.log('Sets is array, length:', numSets);
         } else if (typeof lastExercise.sets === 'number') {
             numSets = lastExercise.sets;
+            console.log('Sets is number:', numSets);
+            // Cap at reasonable maximum
+            if (numSets > 20) {
+                console.warn('Sets value too high:', numSets, 'capping at reps length or 20');
+                numSets = lastExercise.reps?.length || Math.min(numSets, 20);
+            }
         } else if (lastExercise.reps && Array.isArray(lastExercise.reps)) {
             numSets = lastExercise.reps.length;
+            console.log('Using reps length as sets:', numSets);
         }
+        
+        console.log('Final numSets:', numSets);
         
         // Set sets (this will trigger updateRepsInputs)
         document.getElementById('sets').value = numSets;
@@ -2812,25 +2834,30 @@ class WorkoutTracker {
                     ex.weights = pairs.map(p => p.weight);
                 }
                 
+                // Final validation - ensure numSets is reasonable
+                if (numSets > 20) {
+                    console.warn('Suspicious numSets:', numSets, 'for exercise:', ex.name);
+                    console.warn('  sets array length:', ex.sets?.length);
+                    console.warn('  reps array length:', ex.reps?.length);
+                    console.warn('  weights array length:', ex.weights?.length);
+                    console.warn('  sets array:', ex.sets);
+                    console.warn('  reps array:', ex.reps);
+                    // Use the reps length as the source of truth, capped at 20
+                    numSets = Math.min(ex.reps?.length || ex.sets?.length || 2, 20);
+                    console.warn('  Capped numSets to:', numSets);
+                }
+                
                 const exercise = {
                     name: ex.name,
-                    weights: ex.weights || [],
+                    weights: (ex.weights || []).slice(0, numSets), // Trim to actual number of sets
                     sets: numSets, // Use the actual count, not the array
-                    reps: ex.reps || [],
+                    reps: (ex.reps || []).slice(0, numSets), // Trim to actual number of sets
                     difficulty: ex.difficulty,
                     notes: ex.notes,
                     timestamp: ex.timestamp
                 };
                 
-                // Debug logging for suspicious values
-                if (exercise.sets > 20 || exercise.sets < 0) {
-                    console.warn('Suspicious sets value:', exercise.sets, 'for exercise:', exercise.name);
-                    console.warn('  sets array:', ex.sets);
-                    console.warn('  reps array:', ex.reps);
-                    console.warn('  weights array:', ex.weights);
-                    // Cap at reasonable value
-                    exercise.sets = Math.min(Math.max(exercise.sets, 1), 20);
-                }
+                console.log('Created exercise:', exercise.name, 'with', exercise.sets, 'sets');
                 
                 newSessions[ex.date].exercises.push(exercise);
             });
@@ -3049,8 +3076,8 @@ class WorkoutTracker {
     }
     
     async refreshDataFromSheet() {
-        if (!this.isSignedIn || !this.sheetId) {
-            alert('Please sign in and connect a Google Sheet first');
+        if (!this.isSignedIn) {
+            alert('Please sign in first');
             return;
         }
         
@@ -3065,10 +3092,16 @@ class WorkoutTracker {
         }
         
         try {
-            // Clear all local data
+            // Clear all local data in memory
             this.sessions = [];
             this.exerciseList = [];
             this.currentSession = { date: new Date().toISOString().split('T')[0], exercises: [] };
+            
+            // Clear the exercise dropdown completely
+            const exerciseSelect = document.getElementById('exercise-name');
+            if (exerciseSelect) {
+                exerciseSelect.innerHTML = '<option value="">Select or type to add new...</option>';
+            }
             
             // Clear UI
             this.renderTodayWorkout();
@@ -3081,8 +3114,44 @@ class WorkoutTracker {
             if (indicator) indicator.textContent = '🔄';
             if (text) text.textContent = 'Refreshing...';
             
-            // Sync from sheet (this will reload all data and update sessions, exerciseList, etc.)
-            await this.syncFromSheet();
+            // Check if sheet still exists, if not, clear sheet ID and let user reconnect
+            if (this.sheetId) {
+                try {
+                    await this.initGoogleSheets();
+                    if (gapi.client) {
+                        gapi.client.setToken({ access_token: this.googleToken });
+                    }
+                    // Try to access the sheet to see if it exists
+                    await gapi.client.sheets.spreadsheets.get({
+                        spreadsheetId: this.sheetId
+                    });
+                    
+                    // Sheet exists, sync from it
+                    await this.syncFromSheet();
+                } catch (error) {
+                    // Sheet doesn't exist or is inaccessible
+                    console.log('Sheet not found or inaccessible:', error);
+                    // Clear the sheet ID
+                    if (this.userEmail) {
+                        this.saveSheetIdForUser(this.userEmail, null);
+                    }
+                    localStorage.removeItem('sheetId');
+                    this.sheetId = null;
+                    
+                    alert('The Google Sheet was not found or is no longer accessible.\n\n' +
+                          'Please reconnect to a sheet. A new sheet will be created automatically if needed.');
+                    this.updateSyncStatus();
+                    return;
+                }
+            } else {
+                // No sheet ID, try to auto-connect
+                if (this.userEmail) {
+                    await this.autoConnectSheet(this.userEmail);
+                    if (this.sheetId) {
+                        await this.syncFromSheet();
+                    }
+                }
+            }
             
             // syncFromSheet already updates sessions, exerciseList, and UI, so we're done
             // Just update sync status
