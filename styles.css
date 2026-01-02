@@ -639,5 +639,103 @@ textarea:focus {
         display: block;
         margin-bottom: 5px;
     }
+
+    .plans-grid {
+        display: grid;
+        grid-template-columns: 1fr;
+        gap: 15px;
+    }
+
+    .plan-card {
+        background: white;
+        border-radius: 10px;
+        padding: 15px;
+        border: 2px solid #e0e0e0;
+        transition: all 0.3s;
+    }
+
+    .plan-card:hover {
+        border-color: #667eea;
+        box-shadow: 0 2px 8px rgba(102, 126, 234, 0.2);
+    }
+
+    .plan-card.active {
+        border-color: #4caf50;
+        background: #f1f8f4;
+    }
+
+    .plan-card h4 {
+        margin-bottom: 8px;
+        color: #333;
+        font-size: 18px;
+    }
+
+    .plan-meta {
+        color: #666;
+        font-size: 14px;
+        margin-bottom: 8px;
+    }
+
+    .plan-status {
+        color: #4caf50;
+        font-weight: 600;
+        font-size: 14px;
+        margin-bottom: 10px;
+    }
+
+    .plan-actions {
+        display: flex;
+        gap: 5px;
+        margin-top: 10px;
+    }
+
+    .plan-mode-indicator {
+        background: linear-gradient(135deg, #4caf50 0%, #45a049 100%);
+        color: white;
+        padding: 15px;
+        border-radius: 10px;
+        margin-bottom: 20px;
+        text-align: center;
+    }
+
+    .plan-mode-indicator p {
+        margin: 0;
+        font-size: 16px;
+    }
+
+    .plan-indicator {
+        background: #f8f9fa;
+        border: 2px solid #4caf50;
+        border-radius: 10px;
+        padding: 15px;
+        margin-bottom: 20px;
+    }
+
+    .plan-indicator-content {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+    }
+
+    .plan-indicator-content span {
+        font-weight: 600;
+        color: #4caf50;
+        font-size: 16px;
+    }
+
+    .plan-exercise-slot {
+        width: 100%;
+        padding: 12px;
+        border: 2px solid #e0e0e0;
+        border-radius: 10px;
+        font-size: 16px;
+        transition: border-color 0.3s;
+        font-family: inherit;
+    }
+
+    .plan-exercise-slot:focus {
+        outline: none;
+        border-color: #667eea;
+    }
 }
 

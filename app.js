@@ -28,6 +28,9 @@ class WorkoutTracker {
         this.restTimerSeconds = 0; // Current timer seconds
         this.restTimerDuration = 60; // Default rest time in seconds (1 minute)
         this.tokenRequestInProgress = false; // Prevent multiple simultaneous token requests
+        this.workoutPlans = []; // Array of workout plans: {id, name, exerciseSlots: [{slotNumber, exerciseName}], createdAt, createdBy, creatorSheetId}
+        this.currentPlanIndex = -1; // Index of current active plan (-1 means no plan active)
+        this.activePlanId = null; // ID of currently active plan
         this.init();
     }
 
@@ -42,6 +45,11 @@ class WorkoutTracker {
             this.isSignedIn = true;
         }
         
+        // Check for plan import from URL parameter
+        const urlParams = new URLSearchParams(window.location.search);
+        const planParam = urlParams.get('plan');
+        const creatorSheetId = urlParams.get('sheet');
+        
         // Only load data if signed in - keep empty until login
         if (this.isSignedIn) {
             // Load default timer first
@@ -54,12 +62,41 @@ class WorkoutTracker {
             // Load exercise list (will try Google Sheets if signed in)
             this.exerciseList = await this.loadExerciseList();
             this.updateExerciseList(true); // Skip save during initial load - just reading
+            
+            // Load workout plans
+            this.workoutPlans = await this.loadWorkoutPlans();
+            
+            // Check if plan import is requested
+            if (planParam && creatorSheetId) {
+                await this.importPlanFromLink(planParam, creatorSheetId);
+            } else if (planParam) {
+                // Plan ID only - try to find in own plans
+                const plan = this.workoutPlans.find(p => p.id === planParam);
+                if (plan) {
+                    this.activatePlan(plan.id);
+                }
+            }
+            
+            // Load current plan index from localStorage
+            const savedPlanIndex = localStorage.getItem('currentPlanIndex');
+            if (savedPlanIndex !== null && this.workoutPlans.length > 0) {
+                this.currentPlanIndex = parseInt(savedPlanIndex, 10);
+                if (this.currentPlanIndex >= 0 && this.currentPlanIndex < this.workoutPlans.length) {
+                    this.activePlanId = this.workoutPlans[this.currentPlanIndex].id;
+                }
+            }
         } else {
             // Keep empty until login
             this.sessions = [];
             this.currentSession = { date: new Date().toISOString().split('T')[0], exercises: [] };
             this.exerciseList = [];
+            this.workoutPlans = [];
             this.updateExerciseList(true); // Skip save - no data to save
+            
+            // If plan parameter exists but not signed in, show message
+            if (planParam) {
+                alert('Please sign in with Google to import this workout plan. After signing in, a new workout sheet will be automatically created for you.');
+            }
         }
         
         this.updateRepsInputs();
@@ -68,6 +105,7 @@ class WorkoutTracker {
         this.setupTabs(); // Setup tabs first so they work immediately
         this.updateSyncStatus();
         this.updateSessionButton(); // Initialize session button state
+        this.updatePlanIndicator(); // Update plan indicator in main screen
         
         // Settings removed - all data is cloud-based
         
@@ -873,12 +911,18 @@ class WorkoutTracker {
                 } else if (tab === 'config') {
                     // Render configuration tab
                     this.renderConfigurationTab();
+                } else if (tab === 'plan') {
+                    // Render plan mode tab
+                    this.renderPlanModeTab();
                 }
             });
         });
         
         // Setup configuration tab event handlers
         this.setupConfigurationHandlers();
+        
+        // Setup plan mode tab event handlers
+        this.setupPlanHandlers();
     }
 
     setupConfigurationHandlers() {
@@ -1221,6 +1265,528 @@ class WorkoutTracker {
         this.renderExerciseConfigList();
         
         alert('Exercise deleted successfully!');
+    }
+
+    setupPlanHandlers() {
+        const generateSlotsBtn = document.getElementById('generate-slots-btn');
+        const savePlanBtn = document.getElementById('save-plan-btn');
+        const cancelPlanBtn = document.getElementById('cancel-plan-btn');
+        const clearPlanBtn = document.getElementById('clear-plan-btn');
+        
+        if (generateSlotsBtn) {
+            generateSlotsBtn.addEventListener('click', () => this.generatePlanSlots());
+        }
+        
+        if (savePlanBtn) {
+            savePlanBtn.addEventListener('click', () => this.saveWorkoutPlan());
+        }
+        
+        if (cancelPlanBtn) {
+            cancelPlanBtn.addEventListener('click', () => this.cancelPlanForm());
+        }
+        
+        if (clearPlanBtn) {
+            clearPlanBtn.addEventListener('click', () => this.clearActivePlan());
+        }
+    }
+
+    async renderPlanModeTab() {
+        const container = document.getElementById('plans-list');
+        if (!container) return;
+        
+        if (this.workoutPlans.length === 0) {
+            container.innerHTML = '<p class="no-data">No workout plans created yet. Create your first plan below.</p>';
+        } else {
+            let html = '<div class="plans-grid">';
+            this.workoutPlans.forEach((plan, index) => {
+                const exerciseCount = plan.exerciseSlots ? plan.exerciseSlots.length : 0;
+                const isActive = this.activePlanId === plan.id;
+                html += `
+                    <div class="plan-card ${isActive ? 'active' : ''}">
+                        <h4>${plan.name}</h4>
+                        <p class="plan-meta">${exerciseCount} exercise${exerciseCount !== 1 ? 's' : ''}</p>
+                        ${isActive ? '<p class="plan-status">✓ Active</p>' : ''}
+                        <div class="plan-actions">
+                            <button class="btn-secondary edit-plan-btn" data-index="${index}" style="padding: 5px 10px; font-size: 12px; margin-right: 5px;">Edit</button>
+                            <button class="btn-secondary share-plan-btn" data-plan-id="${plan.id}" data-sheet-id="${plan.creatorSheetId || this.sheetId}" style="padding: 5px 10px; font-size: 12px; margin-right: 5px;">Share</button>
+                            <button class="btn-danger delete-plan-btn" data-index="${index}" style="padding: 5px 10px; font-size: 12px;">Delete</button>
+                        </div>
+                    </div>
+                `;
+            });
+            html += '</div>';
+            container.innerHTML = html;
+            
+            // Add event listeners
+            container.querySelectorAll('.edit-plan-btn').forEach(btn => {
+                btn.addEventListener('click', (e) => {
+                    const index = parseInt(e.target.dataset.index);
+                    this.editWorkoutPlan(index);
+                });
+            });
+            
+            container.querySelectorAll('.share-plan-btn').forEach(btn => {
+                btn.addEventListener('click', (e) => {
+                    const planId = e.target.dataset.planId;
+                    const sheetId = e.target.dataset.sheetId;
+                    this.sharePlan(planId, sheetId);
+                });
+            });
+            
+            container.querySelectorAll('.delete-plan-btn').forEach(btn => {
+                btn.addEventListener('click', (e) => {
+                    const index = parseInt(e.target.dataset.index);
+                    this.deleteWorkoutPlan(index);
+                });
+            });
+        }
+    }
+
+    generatePlanSlots() {
+        const slotsCount = parseInt(document.getElementById('plan-slots-count').value) || 5;
+        if (slotsCount < 1 || slotsCount > 20) {
+            alert('Please enter a number between 1 and 20');
+            return;
+        }
+        
+        const container = document.getElementById('plan-exercise-slots');
+        if (!container) return;
+        
+        container.innerHTML = '';
+        
+        // Get available exercises
+        const normalizedList = this.normalizeExerciseList(this.exerciseList);
+        const exerciseNames = normalizedList.map(ex => ex.name).sort();
+        
+        for (let i = 1; i <= slotsCount; i++) {
+            const group = document.createElement('div');
+            group.className = 'form-group';
+            group.innerHTML = `
+                <label>Exercise Slot ${i}</label>
+                <select class="plan-exercise-slot" data-slot="${i}">
+                    <option value="">-- Select Exercise --</option>
+                    ${exerciseNames.map(name => `<option value="${name}">${name}</option>`).join('')}
+                </select>
+            `;
+            container.appendChild(group);
+        }
+        
+        document.getElementById('save-plan-btn').style.display = 'inline-block';
+        document.getElementById('cancel-plan-btn').style.display = 'inline-block';
+    }
+
+    async saveWorkoutPlan() {
+        const planName = document.getElementById('plan-name').value.trim();
+        if (!planName) {
+            alert('Please enter a plan name');
+            return;
+        }
+        
+        const slotSelects = document.querySelectorAll('.plan-exercise-slot');
+        const exerciseSlots = [];
+        
+        slotSelects.forEach((select, index) => {
+            const exerciseName = select.value.trim();
+            if (exerciseName) {
+                exerciseSlots.push({
+                    slotNumber: index + 1,
+                    exerciseName: exerciseName
+                });
+            }
+        });
+        
+        if (exerciseSlots.length === 0) {
+            alert('Please select at least one exercise for the plan');
+            return;
+        }
+        
+        const editingIndex = document.getElementById('save-plan-btn').dataset.editIndex;
+        
+        if (editingIndex !== undefined) {
+            // Update existing plan
+            const index = parseInt(editingIndex);
+            this.workoutPlans[index] = {
+                ...this.workoutPlans[index],
+                name: planName,
+                exerciseSlots: exerciseSlots
+            };
+        } else {
+            // Create new plan
+            const planId = `plan_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+            this.workoutPlans.push({
+                id: planId,
+                name: planName,
+                exerciseSlots: exerciseSlots,
+                createdAt: new Date().toISOString(),
+                createdBy: this.userEmail || '',
+                creatorSheetId: this.sheetId
+            });
+        }
+        
+        // Save to Google Sheets
+        await this.saveWorkoutPlans();
+        
+        // Re-render
+        this.renderPlanModeTab();
+        this.cancelPlanForm();
+        
+        alert('Plan saved successfully!');
+    }
+
+    editWorkoutPlan(index) {
+        if (index < 0 || index >= this.workoutPlans.length) return;
+        
+        const plan = this.workoutPlans[index];
+        
+        document.getElementById('plan-name').value = plan.name;
+        document.getElementById('plan-slots-count').value = plan.exerciseSlots.length;
+        
+        // Generate slots
+        this.generatePlanSlots();
+        
+        // Populate with existing exercises
+        setTimeout(() => {
+            plan.exerciseSlots.forEach(slot => {
+                const select = document.querySelector(`.plan-exercise-slot[data-slot="${slot.slotNumber}"]`);
+                if (select) {
+                    select.value = slot.exerciseName;
+                }
+            });
+        }, 100);
+        
+        document.getElementById('save-plan-btn').dataset.editIndex = index;
+        document.getElementById('plan-form-title').textContent = 'Edit Plan';
+    }
+
+    async deleteWorkoutPlan(index) {
+        if (index < 0 || index >= this.workoutPlans.length) return;
+        
+        const plan = this.workoutPlans[index];
+        
+        if (!confirm(`Are you sure you want to delete "${plan.name}"?`)) {
+            return;
+        }
+        
+        // If this was the active plan, clear it
+        if (this.activePlanId === plan.id) {
+            this.clearActivePlan();
+        }
+        
+        // Remove from list
+        this.workoutPlans.splice(index, 1);
+        
+        // Save to Google Sheets
+        await this.saveWorkoutPlans();
+        
+        // Re-render
+        this.renderPlanModeTab();
+        
+        alert('Plan deleted successfully!');
+    }
+
+    cancelPlanForm() {
+        document.getElementById('plan-name').value = '';
+        document.getElementById('plan-slots-count').value = '5';
+        document.getElementById('plan-exercise-slots').innerHTML = '';
+        document.getElementById('save-plan-btn').style.display = 'none';
+        document.getElementById('cancel-plan-btn').style.display = 'none';
+        delete document.getElementById('save-plan-btn').dataset.editIndex;
+        document.getElementById('plan-form-title').textContent = 'Create New Plan';
+    }
+
+    getCurrentPlan() {
+        if (this.currentPlanIndex >= 0 && this.currentPlanIndex < this.workoutPlans.length) {
+            return this.workoutPlans[this.currentPlanIndex];
+        }
+        return null;
+    }
+
+    getNextPlan() {
+        if (this.workoutPlans.length === 0) return null;
+        
+        // Increment plan index
+        this.currentPlanIndex = (this.currentPlanIndex + 1) % this.workoutPlans.length;
+        localStorage.setItem('currentPlanIndex', this.currentPlanIndex.toString());
+        
+        return this.workoutPlans[this.currentPlanIndex];
+    }
+
+    activatePlan(planId) {
+        const planIndex = this.workoutPlans.findIndex(p => p.id === planId);
+        if (planIndex >= 0) {
+            this.currentPlanIndex = planIndex;
+            this.activePlanId = planId;
+            localStorage.setItem('currentPlanIndex', planIndex.toString());
+            this.updateExerciseList();
+            this.updatePlanIndicator();
+            return true;
+        }
+        return false;
+    }
+
+    clearActivePlan() {
+        this.currentPlanIndex = -1;
+        this.activePlanId = null;
+        localStorage.removeItem('currentPlanIndex');
+        this.updateExerciseList();
+        this.updatePlanIndicator();
+    }
+
+    filterExercisesByPlan() {
+        if (!this.activePlanId) return null;
+        
+        const plan = this.workoutPlans.find(p => p.id === this.activePlanId);
+        if (!plan || !plan.exerciseSlots) return null;
+        
+        const planExerciseNames = new Set(plan.exerciseSlots.map(slot => slot.exerciseName));
+        return this.exerciseList.filter(ex => {
+            const name = typeof ex === 'object' ? ex.name : ex;
+            return planExerciseNames.has(name);
+        });
+    }
+
+    updatePlanIndicator() {
+        const indicator = document.getElementById('plan-mode-indicator');
+        const activePlanName = document.getElementById('active-plan-name');
+        const planIndicator = document.getElementById('plan-indicator');
+        const currentPlanName = document.getElementById('current-plan-name');
+        
+        if (this.activePlanId) {
+            const plan = this.workoutPlans.find(p => p.id === this.activePlanId);
+            if (plan) {
+                if (indicator) {
+                    indicator.style.display = 'block';
+                    if (activePlanName) activePlanName.textContent = plan.name;
+                }
+                if (planIndicator) {
+                    planIndicator.style.display = 'block';
+                    if (currentPlanName) currentPlanName.textContent = plan.name;
+                }
+            }
+        } else {
+            if (indicator) indicator.style.display = 'none';
+            if (planIndicator) planIndicator.style.display = 'none';
+        }
+    }
+
+    generatePlanLink(planId, creatorSheetId) {
+        const baseUrl = window.location.origin + window.location.pathname;
+        return `${baseUrl}?plan=${planId}&sheet=${creatorSheetId}`;
+    }
+
+    async sharePlan(planId, creatorSheetId) {
+        const plan = this.workoutPlans.find(p => p.id === planId);
+        if (!plan) {
+            alert('Plan not found');
+            return;
+        }
+        
+        // Get exercise configurations for the plan
+        const planLink = this.generatePlanLink(planId, creatorSheetId);
+        const normalizedList = this.normalizeExerciseList(this.exerciseList);
+        
+        let emailBody = `Subject: Workout Plan: ${plan.name}\n\n`;
+        emailBody += `Hi!\n\n`;
+        emailBody += `Here's a workout plan shared with you:\n\n`;
+        emailBody += `Plan: ${plan.name}\n\n`;
+        emailBody += `Exercises:\n`;
+        
+        plan.exerciseSlots.forEach((slot, index) => {
+            const exercise = normalizedList.find(ex => ex.name === slot.exerciseName);
+            emailBody += `${index + 1}. ${slot.exerciseName}\n`;
+            if (exercise) {
+                if (exercise.timerDuration) {
+                    emailBody += `   - Rest Timer: ${this.formatRestTimer(exercise.timerDuration)}\n`;
+                }
+                if (exercise.youtubeLink) {
+                    emailBody += `   - YouTube: ${exercise.youtubeLink}\n`;
+                }
+                emailBody += `   - Type: ${exercise.isAerobic ? 'Aerobic' : 'Strength'}\n`;
+            }
+            emailBody += `\n`;
+        });
+        
+        emailBody += `Click this link to import the plan into your workout tracker:\n`;
+        emailBody += `${planLink}\n\n`;
+        emailBody += `When you click the link, you'll be asked to sign in with Google. After signing in, a new workout sheet will be automatically created for you with this plan and all exercises configured (rest timers, YouTube links, etc.).\n\n`;
+        emailBody += `Happy training!`;
+        
+        // Try to copy to clipboard
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+            try {
+                await navigator.clipboard.writeText(emailBody);
+                alert('Plan details copied to clipboard! You can paste it into your email client.');
+            } catch (e) {
+                // Fallback to mailto
+                window.location.href = `mailto:?body=${encodeURIComponent(emailBody)}`;
+            }
+        } else {
+            // Fallback to mailto
+            window.location.href = `mailto:?body=${encodeURIComponent(emailBody)}`;
+        }
+    }
+
+    async fetchPlanFromCreator(planId, creatorSheetId) {
+        try {
+            await this.initGoogleSheets();
+            
+            if (gapi.client) {
+                gapi.client.setToken({ access_token: this.googleToken });
+            }
+            
+            // Try to read from creator's sheet
+            const response = await gapi.client.sheets.spreadsheets.values.get({
+                spreadsheetId: creatorSheetId,
+                range: 'Plans!A2:F1000'
+            });
+            
+            const rows = response.result.values || [];
+            for (const row of rows) {
+                if (row[0]?.trim() === planId) {
+                    const plan = {
+                        id: row[0].trim(),
+                        name: row[1]?.trim() || '',
+                        exerciseSlots: [],
+                        createdAt: row[3]?.trim() || new Date().toISOString(),
+                        createdBy: row[4]?.trim() || '',
+                        creatorSheetId: creatorSheetId
+                    };
+                    
+                    if (row[2]) {
+                        try {
+                            plan.exerciseSlots = JSON.parse(row[2]);
+                        } catch (e) {
+                            console.warn('Error parsing exercise slots:', e);
+                        }
+                    }
+                    
+                    return plan;
+                }
+            }
+        } catch (error) {
+            console.error('Error fetching plan from creator:', error);
+        }
+        return null;
+    }
+
+    async copyExerciseConfigToRecipient(exerciseName, config) {
+        // Check if exercise exists in recipient's Exercises sheet
+        const normalizedList = this.normalizeExerciseList(this.exerciseList);
+        const existingExercise = normalizedList.find(ex => ex.name === exerciseName);
+        
+        if (existingExercise) {
+            // Update existing exercise
+            const index = this.exerciseList.findIndex(ex => {
+                const name = typeof ex === 'object' ? ex.name : ex;
+                return name === exerciseName;
+            });
+            if (index >= 0) {
+                this.exerciseList[index] = {
+                    name: exerciseName,
+                    timerDuration: config.timerDuration || this.defaultTimer,
+                    youtubeLink: config.youtubeLink || '',
+                    isAerobic: config.isAerobic || false
+                };
+            }
+        } else {
+            // Add new exercise
+            this.exerciseList.push({
+                name: exerciseName,
+                timerDuration: config.timerDuration || this.defaultTimer,
+                youtubeLink: config.youtubeLink || '',
+                isAerobic: config.isAerobic || false
+            });
+        }
+        
+        // Save to sheet
+        await this.saveExerciseList();
+        this.updateExerciseList();
+    }
+
+    async importPlanFromLink(planId, creatorSheetId) {
+        if (!this.isSignedIn || !this.sheetId) {
+            alert('Please sign in with Google to import this workout plan.');
+            return;
+        }
+        
+        try {
+            // Fetch plan from creator's sheet
+            const plan = await this.fetchPlanFromCreator(planId, creatorSheetId);
+            if (!plan) {
+                alert('Plan not found. It may have been deleted or the link is invalid.');
+                return;
+            }
+            
+            // Get exercise configurations from creator's sheet
+            const normalizedList = this.normalizeExerciseList(this.exerciseList);
+            
+            // For each exercise in the plan, copy its configuration
+            for (const slot of plan.exerciseSlots) {
+                // Fetch exercise config from creator's Exercises sheet
+                try {
+                    const exerciseResponse = await gapi.client.sheets.spreadsheets.values.get({
+                        spreadsheetId: creatorSheetId,
+                        range: 'Exercises!A2:D1000'
+                    });
+                    
+                    const exerciseRows = exerciseResponse.result.values || [];
+                    for (const row of exerciseRows) {
+                        if (row[0]?.trim() === slot.exerciseName) {
+                            const config = {
+                                timerDuration: this.defaultTimer,
+                                youtubeLink: '',
+                                isAerobic: false
+                            };
+                            
+                            if (row[1]) {
+                                const parsed = this.parseRestTimer(String(row[1]).trim());
+                                if (parsed !== null) {
+                                    config.timerDuration = parsed;
+                                }
+                            }
+                            
+                            if (row[2]) {
+                                config.youtubeLink = String(row[2]).trim();
+                            }
+                            
+                            if (row[3]) {
+                                const aerobicStr = String(row[3]).trim().toLowerCase();
+                                config.isAerobic = aerobicStr === 'true' || aerobicStr === '1' || aerobicStr === 'yes';
+                            }
+                            
+                            await this.copyExerciseConfigToRecipient(slot.exerciseName, config);
+                            break;
+                        }
+                    }
+                } catch (error) {
+                    console.warn(`Error fetching config for ${slot.exerciseName}:`, error);
+                    // Add exercise with default config if we can't fetch
+                    await this.copyExerciseConfigToRecipient(slot.exerciseName, {
+                        timerDuration: this.defaultTimer,
+                        youtubeLink: '',
+                        isAerobic: false
+                    });
+                }
+            }
+            
+            // Add plan to recipient's Plans sheet
+            plan.id = `plan_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+            plan.creatorSheetId = this.sheetId;
+            plan.createdBy = this.userEmail || '';
+            this.workoutPlans.push(plan);
+            await this.saveWorkoutPlans();
+            
+            // Activate the plan
+            this.activatePlan(plan.id);
+            
+            // Clear URL parameters
+            window.history.replaceState({}, document.title, window.location.pathname);
+            
+            alert('Plan imported successfully! Your sheet has been set up with all exercises configured.');
+        } catch (error) {
+            console.error('Error importing plan:', error);
+            alert('Error importing plan. Please try again.');
+        }
     }
 
     updateRepsInputs() {
@@ -2694,6 +3260,173 @@ class WorkoutTracker {
         }
     }
 
+    async getPlansTabName() {
+        try {
+            await this.initGoogleSheets();
+            const response = await gapi.client.sheets.spreadsheets.get({
+                spreadsheetId: this.sheetId
+            });
+            const sheets = response.result.sheets || [];
+            const plansSheet = sheets.find(s => s.properties.title === 'Plans');
+            if (plansSheet) {
+                return 'Plans';
+            }
+            if (sheets.length > 2) {
+                return sheets[2].properties.title;
+            }
+        } catch (error) {
+            console.warn('Could not get Plans tab name:', error);
+        }
+        return 'Plans';
+    }
+
+    async createPlansSheet() {
+        try {
+            await gapi.client.sheets.spreadsheets.batchUpdate({
+                spreadsheetId: this.sheetId,
+                resource: {
+                    requests: [{
+                        addSheet: {
+                            properties: {
+                                title: 'Plans',
+                                gridProperties: {
+                                    rowCount: 1000,
+                                    columnCount: 6
+                                }
+                            }
+                        }
+                    }]
+                }
+            });
+        } catch (error) {
+            console.error('Error creating Plans sheet:', error);
+            throw error;
+        }
+    }
+
+    async loadWorkoutPlans() {
+        if (!this.isSignedIn || !this.sheetId) return [];
+
+        try {
+            await this.initGoogleSheets();
+            
+            if (gapi.client) {
+                gapi.client.setToken({ access_token: this.googleToken });
+            } else {
+                console.error('gapi.client not available in loadWorkoutPlans');
+                return [];
+            }
+            
+            let plansTabName = 'Plans';
+            try {
+                plansTabName = await this.getPlansTabName();
+            } catch (e) {
+                // Use default, tab might not exist yet
+            }
+            
+            const escapedTabName = this.escapeSheetTabName(plansTabName);
+            const response = await gapi.client.sheets.spreadsheets.values.get({
+                spreadsheetId: this.sheetId,
+                range: `${escapedTabName}!A2:F1000` // Skip header row, load columns A-F
+            });
+
+            const rows = response.result.values || [];
+            if (rows.length > 0) {
+                const plans = rows
+                    .map(row => {
+                        const id = row[0]?.trim();
+                        if (!id || id.length === 0) return null;
+                        
+                        const plan = {
+                            id: id,
+                            name: row[1]?.trim() || '',
+                            exerciseSlots: [],
+                            createdAt: row[3]?.trim() || new Date().toISOString(),
+                            createdBy: row[4]?.trim() || this.userEmail || '',
+                            creatorSheetId: row[5]?.trim() || this.sheetId
+                        };
+                        
+                        // Column C: Exercise Slots (JSON string)
+                        if (row[2] !== undefined && row[2] !== null && row[2] !== '') {
+                            try {
+                                plan.exerciseSlots = JSON.parse(row[2]);
+                            } catch (e) {
+                                console.warn('Error parsing exercise slots for plan:', id, e);
+                            }
+                        }
+                        
+                        return plan;
+                    })
+                    .filter(plan => plan !== null);
+                
+                return plans;
+            }
+        } catch (error) {
+            console.log('Plans sheet not found or error loading:', error.message);
+        }
+        return [];
+    }
+
+    async saveWorkoutPlans() {
+        if (!this.isSignedIn || !this.sheetId) return;
+
+        try {
+            await this.initGoogleSheets();
+            
+            let plansTabName = await this.getPlansTabName();
+            
+            try {
+                const rows = [['Plan ID', 'Plan Name', 'Exercise Slots (JSON)', 'Created At', 'Created By', 'Creator Sheet ID']];
+                this.workoutPlans.forEach(plan => {
+                    rows.push([
+                        plan.id,
+                        plan.name,
+                        JSON.stringify(plan.exerciseSlots),
+                        plan.createdAt,
+                        plan.createdBy,
+                        plan.creatorSheetId || this.sheetId
+                    ]);
+                });
+
+                const escapedTabName = this.escapeSheetTabName(plansTabName);
+                const range = `${escapedTabName}!A1`;
+                await gapi.client.sheets.spreadsheets.values.update({
+                    spreadsheetId: this.sheetId,
+                    range: range,
+                    valueInputOption: 'RAW',
+                    resource: { values: rows }
+                });
+            } catch (error) {
+                if (error.message && error.message.includes('Unable to parse range')) {
+                    await this.createPlansSheet();
+                    plansTabName = 'Plans';
+                    const rows = [['Plan ID', 'Plan Name', 'Exercise Slots (JSON)', 'Created At', 'Created By', 'Creator Sheet ID']];
+                    this.workoutPlans.forEach(plan => {
+                        rows.push([
+                            plan.id,
+                            plan.name,
+                            JSON.stringify(plan.exerciseSlots),
+                            plan.createdAt,
+                            plan.createdBy,
+                            plan.creatorSheetId || this.sheetId
+                        ]);
+                    });
+                    const escapedTabName = this.escapeSheetTabName('Plans');
+                    await gapi.client.sheets.spreadsheets.values.update({
+                        spreadsheetId: this.sheetId,
+                        range: `${escapedTabName}!A1`,
+                        valueInputOption: 'RAW',
+                        resource: { values: rows }
+                    });
+                } else {
+                    throw error;
+                }
+            }
+        } catch (error) {
+            console.error('Error saving workout plans to sheet:', error);
+        }
+    }
+
     async loadExerciseListFromSheet() {
         if (!this.isSignedIn || !this.sheetId) return null;
 
@@ -2830,9 +3563,18 @@ class WorkoutTracker {
             this.saveExerciseList(); // Async, but fire-and-forget
         }
 
+        // Filter exercises by plan if plan is active
+        let exercisesToShow = this.exerciseList;
+        if (this.activePlanId) {
+            const filtered = this.filterExercisesByPlan();
+            if (filtered) {
+                exercisesToShow = filtered;
+            }
+        }
+
         // Update select dropdown with color coding
         select.innerHTML = '<option value="">Select or type to add new...</option>';
-        this.exerciseList.forEach(exercise => {
+        exercisesToShow.forEach(exercise => {
             const exerciseName = typeof exercise === 'object' ? exercise.name : exercise;
             const option = document.createElement('option');
             option.value = exerciseName;
@@ -2853,7 +3595,14 @@ class WorkoutTracker {
 
         // Restore previous selection if it still exists
         if (currentValue && this.exerciseListIncludes(currentValue)) {
-            select.value = currentValue;
+            // Check if current value is in filtered list
+            const inFilteredList = exercisesToShow.some(ex => {
+                const name = typeof ex === 'object' ? ex.name : ex;
+                return name === currentValue;
+            });
+            if (inFilteredList) {
+                select.value = currentValue;
+            }
         }
     }
 
@@ -4505,6 +5254,15 @@ class WorkoutTracker {
             
             // Reload current session (today's session)
             this.currentSession = this.getTodaySession();
+            
+            // Plan rotation: if plans exist, rotate to next plan
+            if (this.workoutPlans.length > 0) {
+                const nextPlan = this.getNextPlan();
+                if (nextPlan) {
+                    this.activatePlan(nextPlan.id);
+                    this.currentSession.currentPlanId = nextPlan.id;
+                }
+            }
             
             // Update UI
             this.renderTodayWorkout();
