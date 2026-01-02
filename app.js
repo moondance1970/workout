@@ -1554,13 +1554,16 @@ class WorkoutTracker {
         if (this.activePlanId) {
             const plan = this.workoutPlans.find(p => p.id === this.activePlanId);
             if (plan) {
+                const remainingExercises = plan.exerciseSlots ? plan.exerciseSlots.length : 0;
+                const planText = `${plan.name} (${remainingExercises} remaining)`;
+                
                 if (indicator) {
                     indicator.style.display = 'block';
-                    if (activePlanName) activePlanName.textContent = plan.name;
+                    if (activePlanName) activePlanName.textContent = planText;
                 }
                 if (planIndicator) {
                     planIndicator.style.display = 'block';
-                    if (currentPlanName) currentPlanName.textContent = plan.name;
+                    if (currentPlanName) currentPlanName.textContent = planText;
                 }
             }
         } else {
@@ -2005,13 +2008,34 @@ class WorkoutTracker {
             this.saveExerciseList();
         }
 
-        // Remove exercise from list after saving (it will be repopulated when session starts/ends)
+        // Remove exercise from list after saving (keep it removed during this session)
         const exerciseIndex = this.exerciseList.findIndex(ex => {
             const name = typeof ex === 'object' ? ex.name : ex;
             return name === exerciseName;
         });
         if (exerciseIndex > -1) {
             this.exerciseList.splice(exerciseIndex, 1);
+        }
+
+        // If in plan mode, remove exercise from plan's exercise slots
+        if (this.activePlanId) {
+            const plan = this.workoutPlans.find(p => p.id === this.activePlanId);
+            if (plan && plan.exerciseSlots) {
+                const initialLength = plan.exerciseSlots.length;
+                plan.exerciseSlots = plan.exerciseSlots.filter(slot => slot.exerciseName !== exerciseName);
+                
+                // If we removed a slot, save the updated plan
+                if (plan.exerciseSlots.length < initialLength) {
+                    await this.saveWorkoutPlans();
+                    // Update the plan indicator to show remaining exercises
+                    this.updatePlanIndicator();
+                    // Re-render plan mode tab if it's currently visible
+                    const planTab = document.getElementById('plan-tab');
+                    if (planTab && planTab.classList.contains('active')) {
+                        this.renderPlanModeTab();
+                    }
+                }
+            }
         }
 
         // Save to localStorage first (for offline backup)
