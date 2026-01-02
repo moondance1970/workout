@@ -1361,18 +1361,86 @@ class WorkoutTracker {
         for (let i = 1; i <= slotsCount; i++) {
             const group = document.createElement('div');
             group.className = 'form-group';
-            group.innerHTML = `
-                <label>Exercise Slot ${i}</label>
-                <select class="plan-exercise-slot" data-slot="${i}">
-                    <option value="">-- Select Exercise --</option>
-                    ${exerciseNames.map(name => `<option value="${name}">${name}</option>`).join('')}
-                </select>
-            `;
+            const select = document.createElement('select');
+            select.className = 'plan-exercise-slot';
+            select.dataset.slot = i;
+            
+            // Add empty option
+            const emptyOption = document.createElement('option');
+            emptyOption.value = '';
+            emptyOption.textContent = '-- Select Exercise --';
+            select.appendChild(emptyOption);
+            
+            // Add exercise options (will be filtered by updatePlanSlotOptions)
+            exerciseNames.forEach(name => {
+                const option = document.createElement('option');
+                option.value = name;
+                option.textContent = name;
+                select.appendChild(option);
+            });
+            
+            // Add change event listener to update other dropdowns
+            select.addEventListener('change', () => this.updatePlanSlotOptions());
+            
+            group.innerHTML = `<label>Exercise Slot ${i}</label>`;
+            group.appendChild(select);
             container.appendChild(group);
         }
         
+        // Initial update to filter options
+        this.updatePlanSlotOptions();
+        
         document.getElementById('save-plan-btn').style.display = 'inline-block';
         document.getElementById('cancel-plan-btn').style.display = 'inline-block';
+    }
+
+    updatePlanSlotOptions() {
+        // Get all selected exercises from all slots
+        const slotSelects = document.querySelectorAll('.plan-exercise-slot');
+        const selectedExercises = new Set();
+        
+        slotSelects.forEach(select => {
+            const selectedValue = select.value.trim();
+            if (selectedValue) {
+                selectedExercises.add(selectedValue);
+            }
+        });
+        
+        // Update each dropdown to exclude already-selected exercises
+        slotSelects.forEach(select => {
+            const currentSelection = select.value.trim();
+            const slotNumber = parseInt(select.dataset.slot);
+            
+            // Clear all options except the empty one
+            const emptyOption = select.querySelector('option[value=""]');
+            select.innerHTML = '';
+            if (emptyOption) {
+                select.appendChild(emptyOption);
+            } else {
+                const newEmptyOption = document.createElement('option');
+                newEmptyOption.value = '';
+                newEmptyOption.textContent = '-- Select Exercise --';
+                select.appendChild(newEmptyOption);
+            }
+            
+            // Get available exercises
+            const normalizedList = this.normalizeExerciseList(this.exerciseList);
+            const exerciseNames = normalizedList.map(ex => ex.name).sort();
+            
+            // Add exercises that aren't selected in other slots
+            exerciseNames.forEach(name => {
+                // Include current selection for this slot, exclude others
+                if (name === currentSelection || !selectedExercises.has(name)) {
+                    const option = document.createElement('option');
+                    option.value = name;
+                    option.textContent = name;
+                    if (name === currentSelection) {
+                        option.selected = true;
+                    }
+                    select.appendChild(option);
+                }
+            });
+        });
     }
 
     async saveWorkoutPlan() {
@@ -1452,6 +1520,8 @@ class WorkoutTracker {
                     select.value = slot.exerciseName;
                 }
             });
+            // Update options to reflect selected exercises
+            this.updatePlanSlotOptions();
         }, 100);
         
         document.getElementById('save-plan-btn').dataset.editIndex = index;
