@@ -2464,6 +2464,39 @@ class WorkoutTracker {
             
             await this.initGoogleSheets();
             
+            // Validate that the sheet exists before trying to sync
+            if (gapi.client) {
+                gapi.client.setToken({ access_token: this.googleToken });
+            }
+            
+            try {
+                await gapi.client.sheets.spreadsheets.get({
+                    spreadsheetId: this.sheetId
+                });
+            } catch (error) {
+                // Sheet doesn't exist or is inaccessible
+                console.warn('Sheet not found or inaccessible during sync:', this.sheetId, error);
+                // Clear the sheet ID
+                const oldSheetId = this.sheetId;
+                if (this.userEmail) {
+                    this.saveSheetIdForUser(this.userEmail, null);
+                }
+                localStorage.removeItem('sheetId');
+                this.sheetId = null;
+                console.log('Cleared invalid sheet ID:', oldSheetId);
+                
+                // Clear all data
+                this.sessions = [];
+                this.exerciseList = [];
+                this.currentSession = { date: new Date().toISOString().split('T')[0], exercises: [] };
+                this.renderTodayWorkout();
+                this.renderHistory();
+                this.updateExerciseList();
+                this.updateSyncStatus();
+                
+                throw new Error('The Google Sheet was not found or is no longer accessible. Please reconnect to a sheet.');
+            }
+            
             // Verify we have a valid token set
             if (!this.googleToken) {
                 console.error('No Google token available');
@@ -3190,6 +3223,7 @@ class WorkoutTracker {
                             // New sheet created, sync from it
                             await this.syncFromSheet();
                             this.updateSyncStatus();
+                            this.updateHeaderButtons(); // Ensure session button is visible
                             alert('Old sheet was deleted. A new sheet has been created and connected!');
                             return;
                         }
@@ -3198,6 +3232,7 @@ class WorkoutTracker {
                     alert('The Google Sheet was not found or is no longer accessible.\n\n' +
                           'Please reconnect to a sheet. A new sheet will be created automatically if needed.');
                     this.updateSyncStatus();
+                    this.updateHeaderButtons(); // Ensure session button is visible if signed in
                     return;
                 }
             } else {
@@ -3223,8 +3258,9 @@ class WorkoutTracker {
             // But make sure exercise list is updated one more time to reflect current state
             this.updateExerciseList();
             
-            // Update sync status
+            // Update sync status and header buttons (to ensure session button is visible)
             this.updateSyncStatus();
+            this.updateHeaderButtons();
             
             alert('Data refreshed successfully from Google Sheet!');
         } catch (error) {
@@ -3238,6 +3274,7 @@ class WorkoutTracker {
             this.updateExerciseList();
             alert('Error refreshing data: ' + (error.message || 'Unknown error'));
             this.updateSyncStatus();
+            this.updateHeaderButtons(); // Ensure session button is visible if signed in
         }
     }
 
@@ -3255,8 +3292,15 @@ class WorkoutTracker {
                 if (sheetSessions && sheetSessions.length > 0) {
                     return sheetSessions;
                 }
+                // If sheetSessions is null, it means the sheet was invalid and has been cleared
+                // Return empty array
+                return [];
             } catch (error) {
                 console.warn('Error loading sessions from sheet:', error);
+                // If sheet ID was cleared during validation, return empty
+                if (!this.sheetId) {
+                    return [];
+                }
             }
         }
         
@@ -3290,13 +3334,24 @@ class WorkoutTracker {
                 });
             } catch (error) {
                 // Sheet doesn't exist or is inaccessible
-                console.warn('Sheet not found or inaccessible:', this.sheetId, error);
-                // Clear the sheet ID
+                console.warn('Sheet not found or inaccessible, clearing sheet ID:', this.sheetId, error);
+                const oldSheetId = this.sheetId;
+                
+                // Clear the sheet ID from localStorage
                 if (this.userEmail) {
                     this.saveSheetIdForUser(this.userEmail, null);
                 }
                 localStorage.removeItem('sheetId');
+                
+                // Clear from memory
                 this.sheetId = null;
+                
+                // Clear all data since sheet is invalid
+                this.sessions = [];
+                this.exerciseList = [];
+                this.currentSession = { date: new Date().toISOString().split('T')[0], exercises: [] };
+                
+                console.log('Cleared invalid sheet ID and data. Old sheet ID was:', oldSheetId);
                 return null;
             }
             
