@@ -737,5 +737,38 @@ textarea:focus {
         outline: none;
         border-color: #667eea;
     }
+
+    .session-controls {
+        display: flex;
+        gap: 10px;
+        align-items: center;
+        margin-bottom: 20px;
+        flex-wrap: wrap;
+    }
+
+    .plan-selector {
+        padding: 8px 15px;
+        border: 2px solid #e0e0e0;
+        border-radius: 10px;
+        background: white;
+        color: #333;
+        font-size: 14px;
+        font-weight: 600;
+        cursor: pointer;
+        font-family: inherit;
+        min-width: 150px;
+        transition: border-color 0.3s;
+    }
+
+    .plan-selector:focus {
+        outline: none;
+        border-color: #667eea;
+    }
+
+    .plan-selector option {
+        background: white;
+        color: #333;
+        padding: 8px;
+    }
 }
 

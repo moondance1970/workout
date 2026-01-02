@@ -607,10 +607,9 @@ class WorkoutTracker {
     updateHeaderButtons() {
         const headerButtonContainer = document.getElementById('google-signin-button-header');
         const sessionBtn = document.getElementById('session-btn');
-        const planDropdown = document.getElementById('select-plan-dropdown');
         
         if (!this.isSignedIn) {
-            // Show login button in header, hide session button and plan dropdown
+            // Show login button in header, hide session button
             if (headerButtonContainer) {
                 headerButtonContainer.innerHTML = '';
                 const signInBtn = document.createElement('button');
@@ -622,24 +621,37 @@ class WorkoutTracker {
             if (sessionBtn) {
                 sessionBtn.style.display = 'none';
             }
-            if (planDropdown) {
-                planDropdown.style.display = 'none';
-            }
         } else {
-            // Hide login button, show session button and plan dropdown if plans exist
+            // Hide login button, show session button
             if (headerButtonContainer) {
                 headerButtonContainer.innerHTML = '';
             }
             if (sessionBtn) {
                 sessionBtn.style.display = 'block';
             }
-            this.updatePlanDropdown();
         }
     }
 
     updatePlanDropdown() {
         const planDropdown = document.getElementById('select-plan-dropdown');
+        const startSessionBtn = document.getElementById('start-session-btn');
+        
         if (!planDropdown) return;
+        
+        // Only show in Track Workout tab
+        const trackTab = document.getElementById('track-tab');
+        if (!trackTab || !trackTab.classList.contains('active')) {
+            planDropdown.style.display = 'none';
+            if (startSessionBtn) startSessionBtn.style.display = 'none';
+            return;
+        }
+        
+        // Only show if signed in
+        if (!this.isSignedIn) {
+            planDropdown.style.display = 'none';
+            if (startSessionBtn) startSessionBtn.style.display = 'none';
+            return;
+        }
         
         // Clear existing options except the first one
         planDropdown.innerHTML = '<option value="">Select Plan...</option>';
@@ -658,6 +670,11 @@ class WorkoutTracker {
             planDropdown.style.display = 'block';
         } else {
             planDropdown.style.display = 'none';
+        }
+        
+        // Show start session button if signed in
+        if (startSessionBtn) {
+            startSessionBtn.style.display = 'block';
         }
     }
 
@@ -826,6 +843,18 @@ class WorkoutTracker {
         // Settings tab removed - all data is cloud-based
         document.getElementById('session-btn').addEventListener('click', () => this.handleSessionButton());
         
+        // Start session button in track tab
+        const startSessionBtn = document.getElementById('start-session-btn');
+        if (startSessionBtn) {
+            startSessionBtn.addEventListener('click', async () => {
+                if (this.sessionActive) {
+                    await this.endSession();
+                } else {
+                    await this.startSession();
+                }
+            });
+        }
+        
         // Plan dropdown change handler
         const planDropdown = document.getElementById('select-plan-dropdown');
         if (planDropdown) {
@@ -834,13 +863,8 @@ class WorkoutTracker {
                 if (selectedPlanId) {
                     // Activate the selected plan
                     this.activatePlan(selectedPlanId);
-                    // Start the session
-                    if (!this.sessionActive) {
-                        await this.startSession();
-                    } else {
-                        // Session already active, just update exercise list
-                        this.updateExerciseList();
-                    }
+                    // Update exercise list to show only plan exercises
+                    this.updateExerciseList();
                 } else {
                     // Clear plan if "Select Plan..." is chosen
                     this.clearActivePlan();
@@ -968,6 +992,10 @@ class WorkoutTracker {
                 } else if (tab === 'plan') {
                     // Render plan mode tab
                     this.renderPlanModeTab();
+                } else if (tab === 'track') {
+                    // Update plan dropdown and session button when track tab is opened
+                    this.updatePlanDropdown();
+                    this.updateSessionButtonInTrackTab();
                 }
             });
         });
@@ -5501,6 +5529,24 @@ class WorkoutTracker {
             sessionBtn.textContent = 'New Session';
             sessionBtn.style.background = 'rgba(255, 255, 255, 0.2)';
             sessionBtn.style.borderColor = 'rgba(255, 255, 255, 0.3)';
+        }
+        
+        // Also update the start session button in track tab
+        this.updateSessionButtonInTrackTab();
+    }
+
+    updateSessionButtonInTrackTab() {
+        const startSessionBtn = document.getElementById('start-session-btn');
+        if (!startSessionBtn) return;
+        
+        if (this.sessionActive) {
+            startSessionBtn.textContent = 'End Session';
+            startSessionBtn.style.background = 'rgba(244, 67, 54, 0.9)';
+            startSessionBtn.style.borderColor = 'rgba(244, 67, 54, 1)';
+        } else {
+            startSessionBtn.textContent = 'Start Session';
+            startSessionBtn.style.background = '';
+            startSessionBtn.style.borderColor = '';
         }
     }
 }
