@@ -1121,8 +1121,18 @@ class WorkoutTracker {
     }
 
     populateFormFromLastExercise(lastExercise) {
+        // Ensure sets is a number, not an array
+        let numSets = 3;
+        if (Array.isArray(lastExercise.sets)) {
+            numSets = lastExercise.sets.length;
+        } else if (typeof lastExercise.sets === 'number') {
+            numSets = lastExercise.sets;
+        } else if (lastExercise.reps && Array.isArray(lastExercise.reps)) {
+            numSets = lastExercise.reps.length;
+        }
+        
         // Set sets (this will trigger updateRepsInputs)
-        document.getElementById('sets').value = lastExercise.sets || 3;
+        document.getElementById('sets').value = numSets;
         
         // Update reps inputs first (creates the right number of inputs)
         this.updateRepsInputs();
@@ -2755,6 +2765,13 @@ class WorkoutTracker {
                             };
                         }
                         
+                        // Validate set number (should be 1-20, if not, something is wrong)
+                        if (setNum < 1 || setNum > 20) {
+                            console.warn('Invalid set number detected:', setNum, 'for row:', row);
+                            // Skip this row or use a default
+                            return;
+                        }
+                        
                         // Add this set's data
                         exerciseGroups[key].sets.push(setNum);
                         exerciseGroups[key].reps.push(reps);
@@ -2773,15 +2790,47 @@ class WorkoutTracker {
                     newSessions[ex.date] = { date: ex.date, exercises: [] };
                 }
                 
+                // Ensure sets, reps, and weights arrays are aligned and valid
+                const numSets = Math.max(
+                    ex.sets?.length || 0,
+                    ex.reps?.length || 0,
+                    ex.weights?.length || 0
+                );
+                
+                // Sort sets by set number and align reps/weights accordingly
+                if (ex.sets && ex.sets.length > 0 && ex.reps && ex.reps.length > 0) {
+                    // Create indexed pairs and sort by set number
+                    const pairs = ex.sets.map((setNum, idx) => ({
+                        set: setNum,
+                        rep: ex.reps[idx] || 0,
+                        weight: ex.weights?.[idx] || 0
+                    })).sort((a, b) => a.set - b.set);
+                    
+                    // Rebuild arrays in order
+                    ex.sets = pairs.map(p => p.set);
+                    ex.reps = pairs.map(p => p.rep);
+                    ex.weights = pairs.map(p => p.weight);
+                }
+                
                 const exercise = {
                     name: ex.name,
-                    weights: ex.weights,
-                    sets: ex.sets.length,
-                    reps: ex.reps,
+                    weights: ex.weights || [],
+                    sets: numSets, // Use the actual count, not the array
+                    reps: ex.reps || [],
                     difficulty: ex.difficulty,
                     notes: ex.notes,
                     timestamp: ex.timestamp
                 };
+                
+                // Debug logging for suspicious values
+                if (exercise.sets > 20 || exercise.sets < 0) {
+                    console.warn('Suspicious sets value:', exercise.sets, 'for exercise:', exercise.name);
+                    console.warn('  sets array:', ex.sets);
+                    console.warn('  reps array:', ex.reps);
+                    console.warn('  weights array:', ex.weights);
+                    // Cap at reasonable value
+                    exercise.sets = Math.min(Math.max(exercise.sets, 1), 20);
+                }
                 
                 newSessions[ex.date].exercises.push(exercise);
             });
