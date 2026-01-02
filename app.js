@@ -848,7 +848,7 @@ class WorkoutTracker {
                                 const exercises = await this.loadExerciseList();
                                 if (exercises && exercises.length > 0) {
                                     this.exerciseList = exercises;
-                                    this.updateExerciseList();
+                                    this.updateExerciseList(true); // Skip save - just reading
                                 }
                                 
                                 this.renderHistory();
@@ -2206,19 +2206,18 @@ class WorkoutTracker {
             if (sheetExercises && sheetExercises.length > 0) {
                 console.log('Connecting: Loaded', sheetExercises.length, 'exercises from sheet');
                 this.exerciseList = sheetExercises;
-                this.saveExerciseList();
-                this.updateExerciseList();
+                // Don't save back - we're just reading from the sheet
+                this.updateExerciseList(true); // Skip save - just reading
             } else {
                 this.exerciseList = await this.loadExerciseList();
-                this.updateExerciseList();
+                this.updateExerciseList(true); // Skip save - just reading
             }
             
-            // Immediately sync to sheet after connection (uploads local data if any)
-            await this.syncToSheet(true); // Silent sync
+            // Don't sync to sheet when connecting - sheet is source of truth, we only read from it
+            // Sync only happens when user explicitly saves an exercise
+            // await this.syncToSheet(true); // Removed - don't write on connect
             
-            // After sync, reload to get the latest data
-            this.sessions = await this.loadSessions();
-            this.currentSession = this.getTodaySession();
+            // Data is already loaded above, just render
             this.renderTodayWorkout();
             this.renderHistory();
             
