@@ -19,8 +19,11 @@
                 <span id="sync-text">Not Connected</span>
             </div>
             <div style="margin-bottom: 15px;">
-                <div id="session-btn-container">
+                <div id="session-btn-container" style="display: flex; gap: 10px; align-items: center; justify-content: center; flex-wrap: wrap;">
                     <button id="session-btn" style="width: auto; padding: 10px 20px; margin: 0; display: none;">New Session</button>
+                    <select id="select-plan-dropdown" style="display: none; padding: 10px 20px; border: 2px solid rgba(255, 255, 255, 0.3); border-radius: 10px; background: rgba(255, 255, 255, 0.2); color: white; font-size: 14px; font-weight: 600; cursor: pointer;">
+                        <option value="">Select Plan...</option>
+                    </select>
                     <div id="google-signin-button-header"></div>
                 </div>
             </div>

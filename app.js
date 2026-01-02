@@ -106,6 +106,7 @@ class WorkoutTracker {
         this.updateSyncStatus();
         this.updateSessionButton(); // Initialize session button state
         this.updatePlanIndicator(); // Update plan indicator in main screen
+        this.updatePlanDropdown(); // Update plan dropdown
         
         // Settings removed - all data is cloud-based
         
@@ -606,9 +607,10 @@ class WorkoutTracker {
     updateHeaderButtons() {
         const headerButtonContainer = document.getElementById('google-signin-button-header');
         const sessionBtn = document.getElementById('session-btn');
+        const planDropdown = document.getElementById('select-plan-dropdown');
         
         if (!this.isSignedIn) {
-            // Show login button in header, hide session button
+            // Show login button in header, hide session button and plan dropdown
             if (headerButtonContainer) {
                 headerButtonContainer.innerHTML = '';
                 const signInBtn = document.createElement('button');
@@ -620,14 +622,42 @@ class WorkoutTracker {
             if (sessionBtn) {
                 sessionBtn.style.display = 'none';
             }
+            if (planDropdown) {
+                planDropdown.style.display = 'none';
+            }
         } else {
-            // Hide login button, show session button
+            // Hide login button, show session button and plan dropdown if plans exist
             if (headerButtonContainer) {
                 headerButtonContainer.innerHTML = '';
             }
             if (sessionBtn) {
                 sessionBtn.style.display = 'block';
             }
+            this.updatePlanDropdown();
+        }
+    }
+
+    updatePlanDropdown() {
+        const planDropdown = document.getElementById('select-plan-dropdown');
+        if (!planDropdown) return;
+        
+        // Clear existing options except the first one
+        planDropdown.innerHTML = '<option value="">Select Plan...</option>';
+        
+        // Add plans if they exist
+        if (this.workoutPlans && this.workoutPlans.length > 0) {
+            this.workoutPlans.forEach(plan => {
+                const option = document.createElement('option');
+                option.value = plan.id;
+                option.textContent = plan.name;
+                if (this.activePlanId === plan.id) {
+                    option.selected = true;
+                }
+                planDropdown.appendChild(option);
+            });
+            planDropdown.style.display = 'block';
+        } else {
+            planDropdown.style.display = 'none';
         }
     }
 
@@ -795,6 +825,30 @@ class WorkoutTracker {
         // Settings tab removed - all data is cloud-based
         // Settings tab removed - all data is cloud-based
         document.getElementById('session-btn').addEventListener('click', () => this.handleSessionButton());
+        
+        // Plan dropdown change handler
+        const planDropdown = document.getElementById('select-plan-dropdown');
+        if (planDropdown) {
+            planDropdown.addEventListener('change', async (e) => {
+                const selectedPlanId = e.target.value.trim();
+                if (selectedPlanId) {
+                    // Activate the selected plan
+                    this.activatePlan(selectedPlanId);
+                    // Start the session
+                    if (!this.sessionActive) {
+                        await this.startSession();
+                    } else {
+                        // Session already active, just update exercise list
+                        this.updateExerciseList();
+                    }
+                } else {
+                    // Clear plan if "Select Plan..." is chosen
+                    this.clearActivePlan();
+                    this.updateExerciseList();
+                }
+            });
+        }
+        
         const skipTimerBtn = document.getElementById('skip-timer-btn');
         if (skipTimerBtn) {
             skipTimerBtn.addEventListener('click', () => this.stopRestTimer());
@@ -1494,6 +1548,9 @@ class WorkoutTracker {
         // Save to Google Sheets
         await this.saveWorkoutPlans();
         
+        // Update plan dropdown
+        this.updatePlanDropdown();
+        
         // Re-render
         this.renderPlanModeTab();
         this.cancelPlanForm();
@@ -1548,6 +1605,9 @@ class WorkoutTracker {
         // Save to Google Sheets
         await this.saveWorkoutPlans();
         
+        // Update plan dropdown
+        this.updatePlanDropdown();
+        
         // Re-render
         this.renderPlanModeTab();
         
@@ -1589,6 +1649,7 @@ class WorkoutTracker {
             localStorage.setItem('currentPlanIndex', planIndex.toString());
             this.updateExerciseList();
             this.updatePlanIndicator();
+            this.updatePlanDropdown(); // Update dropdown to show selected plan
             return true;
         }
         return false;
@@ -1600,6 +1661,7 @@ class WorkoutTracker {
         localStorage.removeItem('currentPlanIndex');
         this.updateExerciseList();
         this.updatePlanIndicator();
+        this.updatePlanDropdown(); // Update dropdown to clear selection
     }
 
     filterExercisesByPlan() {
