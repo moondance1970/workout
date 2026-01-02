@@ -3329,30 +3329,51 @@ class WorkoutTracker {
             
             // First, validate that the sheet exists
             try {
-                await gapi.client.sheets.spreadsheets.get({
+                const sheetInfo = await gapi.client.sheets.spreadsheets.get({
                     spreadsheetId: this.sheetId
                 });
+                console.log('Sheet validation passed:', this.sheetId, 'Title:', sheetInfo.result?.properties?.title);
             } catch (error) {
                 // Sheet doesn't exist or is inaccessible
-                console.warn('Sheet not found or inaccessible, clearing sheet ID:', this.sheetId, error);
-                const oldSheetId = this.sheetId;
+                const errorCode = error.result?.error?.code;
+                const errorMessage = error.result?.error?.message || error.message;
+                console.warn('Sheet validation failed:', {
+                    sheetId: this.sheetId,
+                    errorCode: errorCode,
+                    errorMessage: errorMessage,
+                    fullError: error
+                });
                 
-                // Clear the sheet ID from localStorage
-                if (this.userEmail) {
-                    this.saveSheetIdForUser(this.userEmail, null);
+                // Check if it's a 404 (not found) or 403 (permission denied) or 400 (bad request)
+                if (errorCode === 404 || errorCode === 403 || errorCode === 400 || 
+                    errorMessage?.includes('not found') || 
+                    errorMessage?.includes('permission') ||
+                    errorMessage?.includes('Unable to parse range')) {
+                    
+                    const oldSheetId = this.sheetId;
+                    console.warn('Sheet is invalid (404/403/400), clearing sheet ID:', oldSheetId);
+                    
+                    // Clear the sheet ID from localStorage
+                    if (this.userEmail) {
+                        this.saveSheetIdForUser(this.userEmail, null);
+                    }
+                    localStorage.removeItem('sheetId');
+                    
+                    // Clear from memory
+                    this.sheetId = null;
+                    
+                    // Clear all data since sheet is invalid
+                    this.sessions = [];
+                    this.exerciseList = [];
+                    this.currentSession = { date: new Date().toISOString().split('T')[0], exercises: [] };
+                    
+                    console.log('Cleared invalid sheet ID and data. Old sheet ID was:', oldSheetId);
+                    return null;
+                } else {
+                    // Other error - might be temporary, log but don't clear
+                    console.warn('Sheet access error (might be temporary):', error);
+                    throw error; // Re-throw to be handled by outer catch
                 }
-                localStorage.removeItem('sheetId');
-                
-                // Clear from memory
-                this.sheetId = null;
-                
-                // Clear all data since sheet is invalid
-                this.sessions = [];
-                this.exerciseList = [];
-                this.currentSession = { date: new Date().toISOString().split('T')[0], exercises: [] };
-                
-                console.log('Cleared invalid sheet ID and data. Old sheet ID was:', oldSheetId);
-                return null;
             }
             
             console.log('Loading sessions from sheet:', this.sheetId);
