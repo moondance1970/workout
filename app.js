@@ -3712,7 +3712,7 @@ class WorkoutTracker {
                     return;
                 }
                 
-                if (row.length >= 6) {
+                if (row.length >= 5) {
                     const date = row[0]?.trim();
                     const exerciseName = row[1]?.trim();
                     
@@ -3721,13 +3721,25 @@ class WorkoutTracker {
                         return;
                     }
                     
+                    // New format: Date, Exercise, Set, Reps, Weight (kg), Difficulty, Notes
+                    // Set is the number of sets, Reps and Weight are comma-separated
+                    const setCount = parseInt(row[2]) || 0;
+                    const repsStr = (row[3] || '').toString().trim();
+                    const weightsStr = (row[4] || '').toString().trim();
+                    const difficulty = this.parseDifficulty(row[5] || 'medium');
+                    const notes = (row[6] || '').trim();
+                    
+                    // Parse comma-separated values
+                    const repsArray = repsStr.split(',').map(r => parseInt(r.trim()) || 0);
+                    const weightsArray = weightsStr.split(',').map(w => parseFloat(w.trim()) || 0);
+                    
                     const exercise = {
                         name: exerciseName,
-                        weight: parseFloat(row[2]) || 0,
-                        sets: parseInt(row[3]) || 1,
-                        reps: row[4] ? row[4].toString().split('+').map(r => parseInt(r.trim()) || 0).filter(r => r > 0) : [0],
-                        difficulty: this.parseDifficulty(row[5] || 'medium'),
-                        notes: (row[6] || '').trim(),
+                        sets: Math.max(repsArray.length, weightsArray.length, setCount),
+                        reps: repsArray,
+                        weights: weightsArray,
+                        difficulty: difficulty,
+                        notes: notes,
                         timestamp: new Date().toISOString()
                     };
 
