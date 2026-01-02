@@ -2813,7 +2813,7 @@ class WorkoutTracker {
                 }
                 
                 // Ensure sets, reps, and weights arrays are aligned and valid
-                const numSets = Math.max(
+                let numSets = Math.max(
                     ex.sets?.length || 0,
                     ex.reps?.length || 0,
                     ex.weights?.length || 0
