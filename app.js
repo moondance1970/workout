@@ -1877,6 +1877,17 @@ class WorkoutTracker {
                     const rep = reps[i] || 0;
                     const weight = weights[i] || 0;
                     
+                    // Debug logging for Assisted Pullups
+                    if (ex.name === 'Assisted Pullups' && i === 0) {
+                        console.log('Copy function - Assisted Pullups:', {
+                            rep: rep,
+                            weight: weight,
+                            reps: reps,
+                            weights: weights,
+                            numSets: numSets
+                        });
+                    }
+                    
                     // Skip sets with no data (both rep and weight are 0)
                     if (rep === 0 && weight === 0) {
                         continue;
@@ -2905,14 +2916,28 @@ class WorkoutTracker {
                         // Newest format: Date, Exercise, Set, Reps, Weight (kg), Difficulty, Notes
                         // Set is the number of sets, Reps and Weight are comma-separated (e.g., "8,8" and "65,65")
                         const setCount = parseInt(row[2]) || 0; // Number of sets
-                        const repsStr = (row[3] || '').toString().trim();
-                        const weightsStr = (row[4] || '').toString().trim();
+                        const repsStr = (row[3] || '').toString().trim(); // Column D: Reps
+                        const weightsStr = (row[4] || '').toString().trim(); // Column E: Weight (kg)
                         difficulty = this.parseDifficulty(row[5] || 'medium');
                         notes = (row[6] || '').trim();
                         
+                        // Debug logging
+                        console.log('Parsing newest format:', {
+                            exercise: exerciseName,
+                            setCount: setCount,
+                            repsStr: repsStr,
+                            weightsStr: weightsStr,
+                            row: row
+                        });
+                        
                         // Parse comma-separated values
-                        const weightsArray = weightsStr.split(',').map(w => parseFloat(w.trim()) || 0);
                         const repsArray = repsStr.split(',').map(r => parseInt(r.trim()) || 0);
+                        const weightsArray = weightsStr.split(',').map(w => parseFloat(w.trim()) || 0);
+                        
+                        console.log('Parsed arrays:', {
+                            repsArray: repsArray,
+                            weightsArray: weightsArray
+                        });
                         
                         // Create a key for grouping exercises
                         const key = `${date}|${exerciseName}`;
@@ -2938,6 +2963,12 @@ class WorkoutTracker {
                             exerciseGroups[key].reps.push(repsArray[i] || 0);
                             exerciseGroups[key].weights.push(weightsArray[i] || 0);
                         }
+                        
+                        console.log('After adding sets:', {
+                            sets: exerciseGroups[key].sets,
+                            reps: exerciseGroups[key].reps,
+                            weights: exerciseGroups[key].weights
+                        });
                     } else if (formatType === 'oldest') {
                         // Oldest format: Date, Exercise, Weight, Sets, Reps, Difficulty, Notes
                         weight = parseFloat(row[2]) || 0;
