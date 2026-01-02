@@ -1869,20 +1869,24 @@ class WorkoutTracker {
                 // Format as: Exercise Name (Set 1: 10 reps × 50kg, Set 2: 8 reps, ...)
                 // For bodyweight exercises (weight = 0), just show reps without weight
                 const setStrings = [];
-                const numSets = Math.max(reps.length, weights.length, ex.sets || 0);
+                // Only use actual data length, ignore ex.sets which might be incorrect
+                const numSets = Math.max(reps.length, weights.length);
                 
+                // Only show sets that have actual data (reps > 0 or weight > 0)
                 for (let i = 0; i < numSets; i++) {
                     const rep = reps[i] || 0;
                     const weight = weights[i] || 0;
                     
+                    // Skip sets with no data (both rep and weight are 0)
+                    if (rep === 0 && weight === 0) {
+                        continue;
+                    }
+                    
                     if (weight > 0) {
                         // Exercise with weight
                         setStrings.push(`Set ${i + 1}: ${rep} reps × ${weight}kg`);
-                    } else if (rep > 0) {
-                        // Bodyweight exercise (no weight)
-                        setStrings.push(`Set ${i + 1}: ${rep} reps`);
-                    } else if (numSets > 0) {
-                        // Show set even if both are 0, to indicate it was attempted
+                    } else {
+                        // Bodyweight exercise (no weight) or weight is 0
                         setStrings.push(`Set ${i + 1}: ${rep} reps`);
                     }
                 }
@@ -2908,6 +2912,17 @@ class WorkoutTracker {
                         difficulty = this.parseDifficulty(row[5] || 'medium');
                         notes = (row[6] || '').trim();
                         
+                        // Debug logging to verify column mapping
+                        console.log('Parsing row:', {
+                            date: row[0],
+                            exercise: row[1],
+                            set: row[2],
+                            reps: row[3],
+                            weight: row[4],
+                            difficulty: row[5],
+                            parsed: { setNum, reps, weight }
+                        });
+                        
                         // Create a key for grouping exercises (same exercise on same date)
                         const key = `${date}|${exerciseName}`;
                         
@@ -2984,23 +2999,34 @@ class WorkoutTracker {
                     ex.weights = pairs.map(p => p.weight);
                 }
                 
+                // Use the actual array lengths as the source of truth
+                // After sorting, all arrays should be the same length
+                const actualNumSets = Math.max(
+                    ex.reps?.length || 0,
+                    ex.weights?.length || 0,
+                    ex.sets?.length || 0
+                );
+                
                 // Final validation - ensure numSets is reasonable
-                if (numSets > 20) {
-                    console.warn('Suspicious numSets:', numSets, 'for exercise:', ex.name);
+                if (actualNumSets > 20) {
+                    console.warn('Suspicious numSets:', actualNumSets, 'for exercise:', ex.name);
                     console.warn('  sets array length:', ex.sets?.length);
                     console.warn('  reps array length:', ex.reps?.length);
                     console.warn('  weights array length:', ex.weights?.length);
                     console.warn('  sets array:', ex.sets);
                     console.warn('  reps array:', ex.reps);
-                    // Use the reps length as the source of truth, capped at 20
-                    numSets = Math.min(ex.reps?.length || ex.sets?.length || 2, 20);
+                    console.warn('  weights array:', ex.weights);
+                    // Cap at 20
+                    numSets = Math.min(actualNumSets, 20);
                     console.warn('  Capped numSets to:', numSets);
+                } else {
+                    numSets = actualNumSets;
                 }
                 
                 const exercise = {
                     name: ex.name,
                     weights: (ex.weights || []).slice(0, numSets), // Trim to actual number of sets
-                    sets: numSets, // Use the actual count, not the array
+                    sets: numSets, // Use the actual count
                     reps: (ex.reps || []).slice(0, numSets), // Trim to actual number of sets
                     difficulty: ex.difficulty,
                     notes: ex.notes,
@@ -3008,6 +3034,8 @@ class WorkoutTracker {
                 };
                 
                 console.log('Created exercise:', exercise.name, 'with', exercise.sets, 'sets');
+                console.log('  reps:', exercise.reps);
+                console.log('  weights:', exercise.weights);
                 
                 newSessions[ex.date].exercises.push(exercise);
             });
