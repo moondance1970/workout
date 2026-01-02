@@ -1197,14 +1197,49 @@ class WorkoutTracker {
         // Determine exercise name color based on completedTwice status
         const exerciseNameColor = completedTwice ? '#4caf50' : '#f44336';
 
+        // Format current exercise weight/reps (only show weight if > 0)
+        const currentWeights = currentExercise.weights || (currentExercise.weight ? Array(currentExercise.reps.length).fill(currentExercise.weight) : []);
+        const currentReps = currentExercise.reps || [];
+        const currentSetStrings = [];
+        for (let i = 0; i < Math.max(currentReps.length, currentWeights.length); i++) {
+            const rep = currentReps[i] || 0;
+            const weight = currentWeights[i] || 0;
+            if (weight > 0) {
+                currentSetStrings.push(`${rep}×${weight}kg`);
+            } else if (rep > 0) {
+                currentSetStrings.push(`${rep} reps`);
+            }
+        }
+        const currentStr = currentSetStrings.length > 0 
+            ? currentSetStrings.join(' + ')
+            : (currentReps.length > 0 ? currentReps.join(' + ') + ' reps' : '');
+        
         let html = `
             <div class="recommendation-item ${suggestion.action}">
                 <h4 style="color: ${exerciseNameColor};">${currentExercise.name}</h4>
-                <p class="current">Current: ${currentExercise.weight}kg × ${currentExercise.reps.join(' + ')} reps (${this.formatDifficulty(currentExercise.difficulty)})</p>
+                <p class="current">Current: ${currentStr} (${this.formatDifficulty(currentExercise.difficulty)})</p>
         `;
 
         if (lastTwo.length === 2) {
-            html += `<p class="current">Last 2 sessions: ${lastTwo.map(e => `${e.weight}kg × ${e.reps.join(' + ')} (${this.formatDifficulty(e.difficulty)})`).join(' | ')}</p>`;
+            const lastTwoStr = lastTwo.map(e => {
+                const weights = e.weights || (e.weight ? Array(e.reps.length).fill(e.weight) : []);
+                const reps = e.reps || [];
+                const setStrings = [];
+                for (let i = 0; i < Math.max(reps.length, weights.length); i++) {
+                    const rep = reps[i] || 0;
+                    const weight = weights[i] || 0;
+                    if (weight > 0) {
+                        setStrings.push(`${rep}×${weight}kg`);
+                    } else if (rep > 0) {
+                        setStrings.push(`${rep} reps`);
+                    }
+                }
+                const formatted = setStrings.length > 0 
+                    ? setStrings.join(' + ')
+                    : (reps.length > 0 ? reps.join(' + ') + ' reps' : '');
+                return `${formatted} (${this.formatDifficulty(e.difficulty)})`;
+            }).join(' | ');
+            html += `<p class="current">Last 2 sessions: ${lastTwoStr}</p>`;
         }
 
         // Show improvement recommendation if completed twice successfully
@@ -1683,7 +1718,16 @@ class WorkoutTracker {
             this.sessions = [];
         }
         
-        let filteredSessions = [...this.sessions].sort((a, b) => new Date(b.date) - new Date(a.date));
+        // Sort sessions by date (most recent first)
+        // Handle date strings in YYYY-MM-DD format
+        let filteredSessions = [...this.sessions].sort((a, b) => {
+            const dateA = new Date(a.date);
+            const dateB = new Date(b.date);
+            // If dates are invalid, put them at the end
+            if (isNaN(dateA.getTime())) return 1;
+            if (isNaN(dateB.getTime())) return -1;
+            return dateB - dateA; // Most recent first
+        });
         
         if (timeFilter !== 'all') {
             const daysAgo = parseInt(timeFilter);
@@ -1723,13 +1767,52 @@ class WorkoutTracker {
             if (session.exercises && session.exercises.length > 0) {
                 session.exercises.forEach(ex => {
                     const weights = ex.weights || (ex.weight ? Array(ex.reps.length).fill(ex.weight) : []);
-                    const weightStr = weights.map((w, i) => `${ex.reps[i] || 0}×${w || 0}kg`).join(', ');
+                    const reps = ex.reps || [];
+                    
+                    // Format: show weight only if > 0, otherwise just show reps
+                    // For bodyweight exercises, if all reps are the same, just show "8 reps" instead of "8 reps, 8 reps"
+                    const hasWeight = weights.some(w => w > 0);
+                    let detailsStr = '';
+                    
+                    if (hasWeight) {
+                        // Exercise with weights - show each set with weight
+                        const setStrings = [];
+                        for (let i = 0; i < Math.max(reps.length, weights.length); i++) {
+                            const rep = reps[i] || 0;
+                            const weight = weights[i] || 0;
+                            if (weight > 0) {
+                                setStrings.push(`${rep}×${weight}kg`);
+                            } else if (rep > 0) {
+                                setStrings.push(`${rep} reps`);
+                            }
+                        }
+                        detailsStr = setStrings.join(', ');
+                    } else {
+                        // Bodyweight exercise - show each set or use multiplication format
+                        const validReps = reps.filter(r => r > 0);
+                        if (validReps.length === 0) {
+                            detailsStr = '';
+                        } else if (validReps.length === 1) {
+                            // Single set
+                            detailsStr = `${validReps[0]} reps`;
+                        } else {
+                            // Multiple sets - check if all same
+                            const uniqueReps = [...new Set(validReps)];
+                            if (uniqueReps.length === 1) {
+                                // All sets have same reps - show "2 × 8 reps"
+                                detailsStr = `${validReps.length} × ${uniqueReps[0]} reps`;
+                            } else {
+                                // Different reps per set - show "8 reps, 10 reps"
+                                detailsStr = validReps.map(r => `${r} reps`).join(', ');
+                            }
+                        }
+                    }
                     
                     html += `
                         <div class="exercise-item">
                             <div class="exercise-name">${ex.name}</div>
                             <div class="exercise-details">
-                                ${weightStr} | 
+                                ${detailsStr} | 
                                 ${this.formatDifficulty(ex.difficulty)}
                                 ${ex.notes ? ` | ${ex.notes}` : ''}
                             </div>
@@ -1783,23 +1866,43 @@ class WorkoutTracker {
                 const weights = ex.weights || (ex.weight ? Array(ex.reps.length).fill(ex.weight) : Array(ex.reps.length).fill(0));
                 const reps = ex.reps || [];
                 
-                // Format as: Exercise Name (Set 1: 10 reps × 50kg, Set 2: 8 reps × 45kg, ...)
+                // Format as: Exercise Name (Set 1: 10 reps × 50kg, Set 2: 8 reps, ...)
+                // For bodyweight exercises (weight = 0), just show reps without weight
                 const setStrings = [];
-                for (let i = 0; i < reps.length; i++) {
-                    if (reps[i] > 0) {
-                        if (weights[i] && weights[i] > 0) {
-                            setStrings.push(`Set ${i + 1}: ${reps[i]} reps × ${weights[i]}kg`);
-                        } else {
-                            setStrings.push(`Set ${i + 1}: ${reps[i]} reps`);
-                        }
+                const numSets = Math.max(reps.length, weights.length, ex.sets || 0);
+                
+                for (let i = 0; i < numSets; i++) {
+                    const rep = reps[i] || 0;
+                    const weight = weights[i] || 0;
+                    
+                    if (weight > 0) {
+                        // Exercise with weight
+                        setStrings.push(`Set ${i + 1}: ${rep} reps × ${weight}kg`);
+                    } else if (rep > 0) {
+                        // Bodyweight exercise (no weight)
+                        setStrings.push(`Set ${i + 1}: ${rep} reps`);
+                    } else if (numSets > 0) {
+                        // Show set even if both are 0, to indicate it was attempted
+                        setStrings.push(`Set ${i + 1}: ${rep} reps`);
                     }
                 }
                 
-                text += `${ex.name}(${setStrings.join(', ')}`;
+                if (setStrings.length > 0) {
+                    text += `${ex.name} (${setStrings.join(', ')})`;
+                } else {
+                    // Fallback if no sets data
+                    const setsCount = ex.sets || 0;
+                    if (setsCount > 0) {
+                        text += `${ex.name} (${setsCount} sets)`;
+                    } else {
+                        text += `${ex.name}`;
+                    }
+                }
+                
                 if (ex.notes) {
                     text += `, Notes: ${ex.notes}`;
                 }
-                text += ')\n';
+                text += '\n';
             });
         }
         
@@ -2805,7 +2908,7 @@ class WorkoutTracker {
                         difficulty = this.parseDifficulty(row[5] || 'medium');
                         notes = (row[6] || '').trim();
                         
-                        // Create a key for grouping exercises
+                        // Create a key for grouping exercises (same exercise on same date)
                         const key = `${date}|${exerciseName}`;
                         
                         if (!exerciseGroups[key]) {
@@ -2819,6 +2922,9 @@ class WorkoutTracker {
                                 notes: notes,
                                 timestamp: new Date().toISOString()
                             };
+                            console.log('Created new exercise group:', key);
+                        } else {
+                            console.log('Adding set to existing exercise group:', key, 'Set:', setNum, 'Reps:', reps, 'Weight:', weight);
                         }
                         
                         // Validate set number (should be 1-20, if not, something is wrong)
@@ -2828,10 +2934,20 @@ class WorkoutTracker {
                             return;
                         }
                         
-                        // Add this set's data
-                        exerciseGroups[key].sets.push(setNum);
-                        exerciseGroups[key].reps.push(reps);
-                        exerciseGroups[key].weights.push(weight);
+                        // Check if this set number already exists (shouldn't happen in new format, but handle it)
+                        const existingSetIndex = exerciseGroups[key].sets.indexOf(setNum);
+                        if (existingSetIndex >= 0) {
+                            // Set number already exists, update it instead of adding duplicate
+                            console.warn('Duplicate set number detected:', setNum, 'for exercise:', exerciseName, 'on date:', date);
+                            exerciseGroups[key].reps[existingSetIndex] = reps;
+                            exerciseGroups[key].weights[existingSetIndex] = weight;
+                        } else {
+                            // Add this set's data
+                            exerciseGroups[key].sets.push(setNum);
+                            exerciseGroups[key].reps.push(reps);
+                            exerciseGroups[key].weights.push(weight);
+                        }
+                        
                         // Keep the first set's notes
                         if (notes && !exerciseGroups[key].notes) {
                             exerciseGroups[key].notes = notes;
