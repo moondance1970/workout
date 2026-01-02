@@ -809,6 +809,12 @@ class WorkoutTracker {
         document.getElementById('exercise-name-new').addEventListener('input', () => {
             document.getElementById('exercise-name-new').style.display = 'block';
         });
+        
+        // Refresh data button
+        const refreshBtn = document.getElementById('refresh-data-btn');
+        if (refreshBtn) {
+            refreshBtn.addEventListener('click', () => this.refreshDataFromSheet());
+        }
     }
 
     setupTabs() {
@@ -2970,15 +2976,76 @@ class WorkoutTracker {
     updateSyncStatus() {
         const indicator = document.getElementById('sync-indicator');
         const text = document.getElementById('sync-text');
+        const refreshBtn = document.getElementById('refresh-data-btn');
+        
         if (this.isSignedIn && this.sheetId) {
-            indicator.textContent = '🟢';
-            text.textContent = 'Connected';
+            if (indicator) indicator.textContent = '🟢';
+            if (text) text.textContent = 'Connected';
+            if (refreshBtn) {
+                refreshBtn.style.display = 'inline-block';
+                // Re-attach event listener in case button was recreated
+                refreshBtn.onclick = () => this.refreshDataFromSheet();
+            }
         } else if (this.isSignedIn) {
-            indicator.textContent = '🟡';
-            text.textContent = 'Signed In';
+            if (indicator) indicator.textContent = '🟡';
+            if (text) text.textContent = 'Signed In';
+            if (refreshBtn) {
+                refreshBtn.style.display = 'none';
+            }
         } else {
-            indicator.textContent = '⚪';
-            text.textContent = 'Not Connected';
+            if (indicator) indicator.textContent = '⚪';
+            if (text) text.textContent = 'Not Connected';
+            if (refreshBtn) {
+                refreshBtn.style.display = 'none';
+            }
+        }
+    }
+    
+    async refreshDataFromSheet() {
+        if (!this.isSignedIn || !this.sheetId) {
+            alert('Please sign in and connect a Google Sheet first');
+            return;
+        }
+        
+        // Confirm with user
+        const confirmed = confirm(
+            'This will delete all local data and reload everything from your Google Sheet.\n\n' +
+            'Any unsaved changes will be lost. Continue?'
+        );
+        
+        if (!confirmed) {
+            return;
+        }
+        
+        try {
+            // Clear all local data
+            this.sessions = [];
+            this.exerciseList = [];
+            this.currentSession = { date: new Date().toISOString().split('T')[0], exercises: [] };
+            
+            // Clear UI
+            this.renderTodayWorkout();
+            this.renderHistory();
+            this.updateExerciseList();
+            
+            // Update status to show refreshing
+            const indicator = document.getElementById('sync-indicator');
+            const text = document.getElementById('sync-text');
+            if (indicator) indicator.textContent = '🔄';
+            if (text) text.textContent = 'Refreshing...';
+            
+            // Sync from sheet (this will reload all data and update sessions, exerciseList, etc.)
+            await this.syncFromSheet();
+            
+            // syncFromSheet already updates sessions, exerciseList, and UI, so we're done
+            // Just update sync status
+            this.updateSyncStatus();
+            
+            alert('Data refreshed successfully from Google Sheet!');
+        } catch (error) {
+            console.error('Error refreshing data:', error);
+            alert('Error refreshing data: ' + (error.message || 'Unknown error'));
+            this.updateSyncStatus();
         }
     }
 
