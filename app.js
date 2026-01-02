@@ -2906,6 +2906,8 @@ class WorkoutTracker {
                 this.saveExerciseList(); // Sync to Google Sheets
             } else {
                 console.warn('No exercises found in Exercises tab, will extract from sessions');
+                // If Exercises tab is empty, clear the exercise list
+                this.exerciseList = [];
             }
             
             // Always update exercise list (it will merge with exercises from sessions)
@@ -3075,6 +3077,37 @@ class WorkoutTracker {
         }
     }
     
+    async clearExercisesTab() {
+        // Clear the Exercises tab in the Google Sheet
+        if (!this.isSignedIn || !this.sheetId) return;
+        
+        try {
+            await this.initGoogleSheets();
+            if (gapi.client) {
+                gapi.client.setToken({ access_token: this.googleToken });
+            }
+            
+            let exercisesTabName = 'Exercises';
+            try {
+                exercisesTabName = await this.getExercisesTabName();
+            } catch (e) {
+                // Tab might not exist, that's okay
+                return;
+            }
+            
+            const escapedTabName = this.escapeSheetTabName(exercisesTabName);
+            // Clear all data except header
+            await gapi.client.sheets.spreadsheets.values.clear({
+                spreadsheetId: this.sheetId,
+                range: `${escapedTabName}!A2:A1000`
+            });
+            console.log('Cleared Exercises tab');
+        } catch (error) {
+            console.error('Error clearing Exercises tab:', error);
+            // Don't throw - this is not critical
+        }
+    }
+    
     async refreshDataFromSheet() {
         if (!this.isSignedIn) {
             alert('Please sign in first');
@@ -3092,7 +3125,13 @@ class WorkoutTracker {
         }
         
         try {
-            // Clear all local data in memory
+            // Update status to show refreshing FIRST
+            const indicator = document.getElementById('sync-indicator');
+            const text = document.getElementById('sync-text');
+            if (indicator) indicator.textContent = '🔄';
+            if (text) text.textContent = 'Refreshing...';
+            
+            // Clear all local data in memory FIRST
             this.sessions = [];
             this.exerciseList = [];
             this.currentSession = { date: new Date().toISOString().split('T')[0], exercises: [] };
@@ -3103,16 +3142,9 @@ class WorkoutTracker {
                 exerciseSelect.innerHTML = '<option value="">Select or type to add new...</option>';
             }
             
-            // Clear UI
+            // Clear UI immediately
             this.renderTodayWorkout();
             this.renderHistory();
-            this.updateExerciseList();
-            
-            // Update status to show refreshing
-            const indicator = document.getElementById('sync-indicator');
-            const text = document.getElementById('sync-text');
-            if (indicator) indicator.textContent = '🔄';
-            if (text) text.textContent = 'Refreshing...';
             
             // Check if sheet still exists, if not, clear sheet ID and let user reconnect
             if (this.sheetId) {
@@ -3126,7 +3158,8 @@ class WorkoutTracker {
                         spreadsheetId: this.sheetId
                     });
                     
-                    // Sheet exists, sync from it
+                    // Sheet exists, clear Exercises tab first, then sync from it
+                    await this.clearExercisesTab();
                     await this.syncFromSheet();
                 } catch (error) {
                     // Sheet doesn't exist or is inaccessible
@@ -3138,6 +3171,14 @@ class WorkoutTracker {
                     localStorage.removeItem('sheetId');
                     this.sheetId = null;
                     
+                    // Ensure everything is cleared
+                    this.sessions = [];
+                    this.exerciseList = [];
+                    this.currentSession = { date: new Date().toISOString().split('T')[0], exercises: [] };
+                    this.renderTodayWorkout();
+                    this.renderHistory();
+                    this.updateExerciseList(); // Update with empty list
+                    
                     alert('The Google Sheet was not found or is no longer accessible.\n\n' +
                           'Please reconnect to a sheet. A new sheet will be created automatically if needed.');
                     this.updateSyncStatus();
@@ -3148,18 +3189,37 @@ class WorkoutTracker {
                 if (this.userEmail) {
                     await this.autoConnectSheet(this.userEmail);
                     if (this.sheetId) {
+                        await this.clearExercisesTab();
                         await this.syncFromSheet();
+                    } else {
+                        // No sheet found, ensure everything is cleared
+                        this.sessions = [];
+                        this.exerciseList = [];
+                        this.currentSession = { date: new Date().toISOString().split('T')[0], exercises: [] };
+                        this.renderTodayWorkout();
+                        this.renderHistory();
+                        this.updateExerciseList(); // Update with empty list
                     }
                 }
             }
             
-            // syncFromSheet already updates sessions, exerciseList, and UI, so we're done
-            // Just update sync status
+            // syncFromSheet already updates sessions, exerciseList, and UI
+            // But make sure exercise list is updated one more time to reflect current state
+            this.updateExerciseList();
+            
+            // Update sync status
             this.updateSyncStatus();
             
             alert('Data refreshed successfully from Google Sheet!');
         } catch (error) {
             console.error('Error refreshing data:', error);
+            // On error, ensure everything is cleared
+            this.sessions = [];
+            this.exerciseList = [];
+            this.currentSession = { date: new Date().toISOString().split('T')[0], exercises: [] };
+            this.renderTodayWorkout();
+            this.renderHistory();
+            this.updateExerciseList();
             alert('Error refreshing data: ' + (error.message || 'Unknown error'));
             this.updateSyncStatus();
         }
