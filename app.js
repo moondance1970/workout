@@ -2593,24 +2593,62 @@ class WorkoutTracker {
                     // Check if column 2 is "Exercise" and column 3 is "Weight" (old format)
                     // vs column 2 is "Exercise" and column 3 is "Set" (new format)
                     const col2 = (headerRow[2] || '').toString().toLowerCase();
+                    const col3 = (headerRow[3] || '').toString().toLowerCase();
                     if (col2.includes('weight') && !col2.includes('set')) {
                         isOldFormat = true;
-                        console.log('Detected old sheet format (Weight, Sets, Reps)');
+                        console.log('Detected old sheet format from header (Weight, Sets, Reps)');
+                    } else if (col3 && col3.includes('sets')) {
+                        // Column 3 is "Sets" - definitely old format
+                        isOldFormat = true;
+                        console.log('Detected old sheet format from header (column 3 is Sets)');
                     } else {
-                        console.log('Detected new sheet format (Set, Reps, Weight)');
+                        console.log('Detected new sheet format from header (Set, Reps, Weight)');
                     }
                 }
             } catch (e) {
                 console.log('Could not detect format from header, will try to infer from data:', e);
-                // Try to infer from first data row - if column 3 is a number > 10, it's likely weight (old format)
-                // If column 3 is 1, 2, 3, etc., it's likely set number (new format)
-                if (rows.length > 0 && rows[0] && rows[0].length >= 3) {
-                    const col2Value = rows[0][2];
-                    const numValue = parseFloat(col2Value);
-                    if (!isNaN(numValue) && numValue > 10) {
-                        isOldFormat = true;
-                        console.log('Inferred old format from data (column 3 is weight > 10)');
+            }
+            
+            // If header detection failed, try to infer from data rows
+            if (!isOldFormat && rows.length > 0) {
+                // Look at first few data rows to determine format
+                // Old format: column 3 is weight (usually > 5), column 4 is sets (usually 1-10)
+                // New format: column 3 is set number (1, 2, 3...), column 4 is reps
+                let oldFormatCount = 0;
+                let newFormatCount = 0;
+                
+                for (let i = 0; i < Math.min(5, rows.length); i++) {
+                    const row = rows[i];
+                    if (!row || row.length < 5 || (row[0] && row[0].toLowerCase() === 'date')) {
+                        continue; // Skip header or invalid rows
                     }
+                    
+                    const col2 = parseFloat(row[2]);
+                    const col3 = parseFloat(row[3]);
+                    const col4 = parseFloat(row[4]);
+                    
+                    // Old format indicators:
+                    // - Column 2 (index 2) is weight, usually > 5
+                    // - Column 3 (index 3) is sets, usually 1-10
+                    // - Column 4 (index 4) is reps, could be single number or "5+5" format
+                    if (!isNaN(col2) && col2 > 5 && !isNaN(col3) && col3 >= 1 && col3 <= 10) {
+                        oldFormatCount++;
+                    }
+                    
+                    // New format indicators:
+                    // - Column 2 (index 2) is set number, usually 1, 2, 3...
+                    // - Column 3 (index 3) is reps, usually > 0
+                    // - Column 4 (index 4) is weight, could be any number
+                    if (!isNaN(col2) && col2 >= 1 && col2 <= 20 && !isNaN(col3) && col3 > 0) {
+                        newFormatCount++;
+                    }
+                }
+                
+                if (oldFormatCount > newFormatCount) {
+                    isOldFormat = true;
+                    console.log(`Inferred old format from data (${oldFormatCount} old vs ${newFormatCount} new indicators)`);
+                } else {
+                    console.log(`Inferred new format from data (${newFormatCount} new vs ${oldFormatCount} old indicators)`);
                 }
             }
             
@@ -2645,7 +2683,21 @@ class WorkoutTracker {
                         weight = parseFloat(row[2]) || 0;
                         const sets = parseInt(row[3]) || 1;
                         const repsStr = row[4] ? row[4].toString() : '';
-                        const repsArray = repsStr.split('+').map(r => parseInt(r.trim()) || 0).filter(r => r > 0);
+                        let repsArray = repsStr.split('+').map(r => parseInt(r.trim()) || 0).filter(r => r > 0);
+                        
+                        // If repsArray has fewer values than sets, repeat the last rep value
+                        // This handles cases where old format had "5" for 2 sets (should be "5+5")
+                        if (repsArray.length > 0 && repsArray.length < sets) {
+                            const lastRep = repsArray[repsArray.length - 1];
+                            while (repsArray.length < sets) {
+                                repsArray.push(lastRep);
+                            }
+                        }
+                        // If no reps found but sets > 0, create empty reps
+                        if (repsArray.length === 0 && sets > 0) {
+                            repsArray = Array(sets).fill(0);
+                        }
+                        
                         difficulty = this.parseDifficulty(row[5] || 'medium');
                         notes = (row[6] || '').trim();
                         
@@ -2666,11 +2718,13 @@ class WorkoutTracker {
                         }
                         
                         // Add each set's data (old format had all sets in one row)
-                        repsArray.forEach((rep, i) => {
+                        // Use the actual number of sets from the data, not repsArray length
+                        const numSetsToAdd = Math.max(sets, repsArray.length);
+                        for (let i = 0; i < numSetsToAdd; i++) {
                             exerciseGroups[key].sets.push(i + 1);
-                            exerciseGroups[key].reps.push(rep);
+                            exerciseGroups[key].reps.push(repsArray[i] || 0);
                             exerciseGroups[key].weights.push(weight); // Same weight for all sets in old format
-                        });
+                        }
                     } else {
                         // New format: Date, Exercise, Set, Reps, Weight (kg), Difficulty, Notes
                         setNum = parseInt(row[2]) || 1;
