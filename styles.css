@@ -509,6 +509,86 @@ textarea:focus {
     justify-content: center;
 }
 
+.config-section {
+    background: #f8f9fa;
+    border-radius: 15px;
+    padding: 20px;
+    margin-bottom: 20px;
+    border: 2px solid #e0e0e0;
+}
+
+.config-section h3 {
+    margin-bottom: 15px;
+    color: #667eea;
+    font-size: 18px;
+}
+
+.config-section h4 {
+    margin-bottom: 15px;
+    color: #333;
+    font-size: 16px;
+}
+
+.exercise-config-table {
+    margin-bottom: 20px;
+}
+
+.exercise-config-header {
+    display: grid;
+    grid-template-columns: 2fr 1fr 2fr 0.5fr 1.5fr;
+    gap: 10px;
+    padding: 10px;
+    background: #667eea;
+    color: white;
+    font-weight: 600;
+    border-radius: 8px 8px 0 0;
+    font-size: 14px;
+}
+
+.exercise-config-row {
+    display: grid;
+    grid-template-columns: 2fr 1fr 2fr 0.5fr 1.5fr;
+    gap: 10px;
+    padding: 12px 10px;
+    background: white;
+    border-bottom: 1px solid #e0e0e0;
+    align-items: center;
+    font-size: 14px;
+}
+
+.exercise-config-row:last-child {
+    border-bottom: none;
+    border-radius: 0 0 8px 8px;
+}
+
+.exercise-config-row:hover {
+    background: #f8f9fa;
+}
+
+.exercise-config-row a {
+    color: #667eea;
+    text-decoration: none;
+}
+
+.exercise-config-row a:hover {
+    text-decoration: underline;
+}
+
+.exercise-duration-input {
+    width: 100%;
+    padding: 12px;
+    border: 2px solid #e0e0e0;
+    border-radius: 10px;
+    font-size: 16px;
+    transition: border-color 0.3s;
+    font-family: inherit;
+}
+
+.exercise-duration-input:focus {
+    outline: none;
+    border-color: #667eea;
+}
+
 @media (max-width: 480px) {
     body {
         padding: 10px;
@@ -533,6 +613,31 @@ textarea:focus {
 
     .history-controls {
         grid-template-columns: 1fr;
+    }
+
+    .exercise-config-header,
+    .exercise-config-row {
+        grid-template-columns: 1fr;
+        gap: 5px;
+    }
+
+    .exercise-config-header {
+        display: none;
+    }
+
+    .exercise-config-row {
+        padding: 15px;
+        border: 1px solid #e0e0e0;
+        border-radius: 8px;
+        margin-bottom: 10px;
+    }
+
+    .exercise-config-row > div:before {
+        content: attr(data-label);
+        font-weight: 600;
+        color: #667eea;
+        display: block;
+        margin-bottom: 5px;
     }
 }
 

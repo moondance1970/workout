@@ -27,6 +27,7 @@
             <div class="nav-tabs">
                 <button class="tab-btn active" data-tab="track">Track Workout</button>
                 <button class="tab-btn" data-tab="history">History & Graphs</button>
+                <button class="tab-btn" data-tab="config">Configuration</button>
             </div>
         </header>
 
@@ -108,6 +109,48 @@
             <div id="history-list" class="history-list">
                 <h3>Recent Sessions</h3>
                 <div id="history-content"></div>
+            </div>
+        </div>
+
+        <!-- Configuration Tab -->
+        <div id="config-tab" class="tab-content">
+            <div class="config-section">
+                <h3>Default Rest Timer</h3>
+                <div class="form-group">
+                    <label for="default-timer">Rest Timer Duration (M:S)</label>
+                    <input type="text" id="default-timer" placeholder="1:00" pattern="[0-9]+:[0-5][0-9]">
+                    <small class="help-text">Format: Minutes:Seconds (e.g., 1:30 for 1 minute 30 seconds)</small>
+                </div>
+                <button id="save-default-timer" class="btn-primary">Save Default Timer</button>
+            </div>
+
+            <div class="config-section">
+                <h3>Exercise Configuration</h3>
+                <div id="exercise-config-list"></div>
+                
+                <div class="config-section">
+                    <h4>Add New Exercise</h4>
+                    <div class="form-group">
+                        <label for="new-exercise-name">Exercise Name</label>
+                        <input type="text" id="new-exercise-name" placeholder="Exercise name">
+                    </div>
+                    <div class="form-group">
+                        <label for="new-exercise-timer">Rest Timer Duration (M:S)</label>
+                        <input type="text" id="new-exercise-timer" placeholder="1:00" pattern="[0-9]+:[0-5][0-9]">
+                        <small class="help-text">Leave empty to use default timer</small>
+                    </div>
+                    <div class="form-group">
+                        <label for="new-exercise-youtube">YouTube Link (optional)</label>
+                        <input type="url" id="new-exercise-youtube" placeholder="https://youtube.com/...">
+                    </div>
+                    <div class="form-group">
+                        <label style="display: flex; align-items: center; gap: 10px;">
+                            <input type="checkbox" id="new-exercise-aerobic">
+                            <span>Is Aerobic Exercise</span>
+                        </label>
+                    </div>
+                    <button id="add-exercise-config" class="btn-primary">Add Exercise</button>
+                </div>
             </div>
         </div>
 

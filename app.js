@@ -20,7 +20,8 @@ class WorkoutTracker {
         this.sheetId = this.getSheetId();
         this.isSignedIn = false;
         this.googleConfig = null; // Will be set from GOOGLE_CONFIG or API
-        this.exerciseList = []; // Will be loaded asynchronously
+        this.exerciseList = []; // Will be loaded asynchronously - array of objects: {name, timerDuration?, youtubeLink?, isAerobic}
+        this.defaultTimer = 60; // Default rest timer in seconds (1 minute)
         this.userEmail = null; // Store user email for per-user sheet ID
         this.sessionActive = false; // Track if a session is currently active
         this.restTimer = null; // Timer interval ID
@@ -43,6 +44,9 @@ class WorkoutTracker {
         
         // Only load data if signed in - keep empty until login
         if (this.isSignedIn) {
+            // Load default timer first
+            await this.loadDefaultTimer();
+            
             // Load sessions (will try Google Sheets first if signed in)
             this.sessions = await this.loadSessions();
             this.currentSession = this.getTodaySession();
@@ -777,12 +781,17 @@ class WorkoutTracker {
                     newInput.value = '';
                 }
                 
+                // Update reps/duration inputs based on exercise type
+                this.updateRepsInputs();
+                
                 // Show last time and recommendations for selected exercise
                 this.showExercisePreview(selectedExercise);
             } else {
                 // Clear recommendations if no exercise selected
                 const container = document.getElementById('recommendations-content');
                 container.innerHTML = '<p class="no-data">Select an exercise to see your last session and recommendations</p>';
+                // Reset to default reps/weight inputs
+                this.updateRepsInputs();
             }
         });
 
@@ -861,28 +870,419 @@ class WorkoutTracker {
                             this.renderHistory();
                         }
                     })();
+                } else if (tab === 'config') {
+                    // Render configuration tab
+                    this.renderConfigurationTab();
                 }
+            });
+        });
+        
+        // Setup configuration tab event handlers
+        this.setupConfigurationHandlers();
+    }
+
+    setupConfigurationHandlers() {
+        // Save default timer button
+        const saveDefaultTimerBtn = document.getElementById('save-default-timer');
+        if (saveDefaultTimerBtn) {
+            saveDefaultTimerBtn.addEventListener('click', () => this.saveDefaultTimer());
+        }
+        
+        // Add exercise configuration button
+        const addExerciseConfigBtn = document.getElementById('add-exercise-config');
+        if (addExerciseConfigBtn) {
+            addExerciseConfigBtn.addEventListener('click', () => this.addExerciseConfiguration());
+        }
+    }
+
+    async renderConfigurationTab() {
+        // Load default timer from Google Sheets if available
+        await this.loadDefaultTimer();
+        
+        // Set default timer input
+        const defaultTimerInput = document.getElementById('default-timer');
+        if (defaultTimerInput) {
+            defaultTimerInput.value = this.formatRestTimer(this.defaultTimer);
+        }
+        
+        // Render exercise configuration list
+        this.renderExerciseConfigList();
+    }
+
+    renderExerciseConfigList() {
+        const container = document.getElementById('exercise-config-list');
+        if (!container) return;
+        
+        // Normalize exercise list
+        const normalizedList = this.normalizeExerciseList(this.exerciseList);
+        
+        if (normalizedList.length === 0) {
+            container.innerHTML = '<p class="no-data">No exercises configured. Add exercises in the Track Workout tab or below.</p>';
+            return;
+        }
+        
+        let html = '<div class="exercise-config-table">';
+        html += '<div class="exercise-config-header">';
+        html += '<div>Exercise Name</div>';
+        html += '<div>Rest Timer (M:S)</div>';
+        html += '<div>YouTube Link</div>';
+        html += '<div>Aerobic</div>';
+        html += '<div>Actions</div>';
+        html += '</div>';
+        
+        normalizedList.forEach((exercise, index) => {
+            const timerStr = exercise.timerDuration ? this.formatRestTimer(exercise.timerDuration) : '';
+            const youtubeLink = exercise.youtubeLink || '';
+            const isAerobic = exercise.isAerobic ? '✓' : '';
+            
+            html += `<div class="exercise-config-row" data-index="${index}">`;
+            html += `<div>${exercise.name}</div>`;
+            html += `<div>${timerStr}</div>`;
+            html += `<div>${youtubeLink ? `<a href="${youtubeLink}" target="_blank">Link</a>` : '-'}</div>`;
+            html += `<div>${isAerobic}</div>`;
+            html += `<div><button class="btn-secondary edit-exercise-config" data-index="${index}" style="padding: 5px 10px; font-size: 12px; margin-right: 5px;">Edit</button><button class="btn-danger delete-exercise-config" data-index="${index}" style="padding: 5px 10px; font-size: 12px;">Delete</button></div>`;
+            html += `</div>`;
+        });
+        
+        html += '</div>';
+        container.innerHTML = html;
+        
+        // Add event listeners for edit/delete buttons
+        container.querySelectorAll('.edit-exercise-config').forEach(btn => {
+            btn.addEventListener('click', (e) => {
+                const index = parseInt(e.target.dataset.index);
+                this.editExerciseConfiguration(index);
+            });
+        });
+        
+        container.querySelectorAll('.delete-exercise-config').forEach(btn => {
+            btn.addEventListener('click', (e) => {
+                const index = parseInt(e.target.dataset.index);
+                this.deleteExerciseConfiguration(index);
             });
         });
     }
 
+    async saveDefaultTimer() {
+        const defaultTimerInput = document.getElementById('default-timer');
+        if (!defaultTimerInput) return;
+        
+        const timerStr = defaultTimerInput.value.trim();
+        const parsed = this.parseRestTimer(timerStr);
+        
+        if (parsed === null) {
+            alert('Please enter a valid timer duration in M:S format (e.g., 1:30)');
+            return;
+        }
+        
+        this.defaultTimer = parsed;
+        this.restTimerDuration = parsed; // Also update current rest timer duration
+        
+        // Save to Google Sheets
+        if (this.isSignedIn && this.sheetId) {
+            try {
+                await this.saveDefaultTimerToSheet();
+                alert('Default timer saved successfully!');
+            } catch (error) {
+                console.error('Error saving default timer:', error);
+                alert('Error saving default timer. Please try again.');
+            }
+        } else {
+            alert('Please sign in to save configuration.');
+        }
+    }
+
+    async loadDefaultTimer() {
+        if (!this.isSignedIn || !this.sheetId) return;
+        
+        try {
+            await this.initGoogleSheets();
+            const response = await gapi.client.sheets.spreadsheets.values.get({
+                spreadsheetId: this.sheetId,
+                range: 'Config!A1'
+            });
+            
+            if (response.result.values && response.result.values.length > 0 && response.result.values[0].length > 0) {
+                const timerStr = String(response.result.values[0][0]).trim();
+                const parsed = this.parseRestTimer(timerStr);
+                if (parsed !== null) {
+                    this.defaultTimer = parsed;
+                    this.restTimerDuration = parsed;
+                }
+            }
+        } catch (error) {
+            // Config sheet might not exist yet, that's okay
+            console.log('Config sheet not found or error loading default timer:', error.message);
+        }
+    }
+
+    async saveDefaultTimerToSheet() {
+        if (!this.isSignedIn || !this.sheetId) return;
+        
+        try {
+            await this.initGoogleSheets();
+            
+            // Try to get Config sheet, create if it doesn't exist
+            try {
+                const response = await gapi.client.sheets.spreadsheets.get({
+                    spreadsheetId: this.sheetId
+                });
+                const sheets = response.result.sheets || [];
+                const configSheet = sheets.find(s => s.properties.title === 'Config');
+                
+                if (!configSheet) {
+                    // Create Config sheet
+                    await gapi.client.sheets.spreadsheets.batchUpdate({
+                        spreadsheetId: this.sheetId,
+                        resource: {
+                            requests: [{
+                                addSheet: {
+                                    properties: {
+                                        title: 'Config',
+                                        gridProperties: {
+                                            rowCount: 10,
+                                            columnCount: 1
+                                        }
+                                    }
+                                }
+                            }]
+                        }
+                    });
+                }
+            } catch (error) {
+                console.error('Error checking/creating Config sheet:', error);
+            }
+            
+            // Save default timer
+            const timerStr = this.formatRestTimer(this.defaultTimer);
+            await gapi.client.sheets.spreadsheets.values.update({
+                spreadsheetId: this.sheetId,
+                range: 'Config!A1',
+                valueInputOption: 'RAW',
+                resource: { values: [[timerStr]] }
+            });
+        } catch (error) {
+            console.error('Error saving default timer to sheet:', error);
+            throw error;
+        }
+    }
+
+    addExerciseConfiguration() {
+        const nameInput = document.getElementById('new-exercise-name');
+        const timerInput = document.getElementById('new-exercise-timer');
+        const youtubeInput = document.getElementById('new-exercise-youtube');
+        const aerobicCheckbox = document.getElementById('new-exercise-aerobic');
+        
+        if (!nameInput || !timerInput || !youtubeInput || !aerobicCheckbox) return;
+        
+        const name = nameInput.value.trim();
+        if (!name) {
+            alert('Please enter an exercise name');
+            return;
+        }
+        
+        // Check if exercise already exists
+        if (this.exerciseListIncludes(name)) {
+            alert('Exercise already exists. Please edit the existing exercise instead.');
+            return;
+        }
+        
+        const timerStr = timerInput.value.trim();
+        const timerDuration = timerStr ? (this.parseRestTimer(timerStr) || this.defaultTimer) : this.defaultTimer;
+        const youtubeLink = youtubeInput.value.trim();
+        const isAerobic = aerobicCheckbox.checked;
+        
+        // Add to exercise list
+        this.exerciseList.push({
+            name: name,
+            timerDuration: timerDuration,
+            youtubeLink: youtubeLink,
+            isAerobic: isAerobic
+        });
+        
+        // Save to Google Sheets
+        this.saveExerciseList();
+        this.updateExerciseList();
+        
+        // Clear form
+        nameInput.value = '';
+        timerInput.value = '';
+        youtubeInput.value = '';
+        aerobicCheckbox.checked = false;
+        
+        // Re-render list
+        this.renderExerciseConfigList();
+        
+        alert('Exercise added successfully!');
+    }
+
+    editExerciseConfiguration(index) {
+        const normalizedList = this.normalizeExerciseList(this.exerciseList);
+        if (index < 0 || index >= normalizedList.length) return;
+        
+        const exercise = normalizedList[index];
+        
+        // Populate form with exercise data
+        const nameInput = document.getElementById('new-exercise-name');
+        const timerInput = document.getElementById('new-exercise-timer');
+        const youtubeInput = document.getElementById('new-exercise-youtube');
+        const aerobicCheckbox = document.getElementById('new-exercise-aerobic');
+        const addBtn = document.getElementById('add-exercise-config');
+        
+        if (!nameInput || !timerInput || !youtubeInput || !aerobicCheckbox || !addBtn) return;
+        
+        nameInput.value = exercise.name;
+        timerInput.value = exercise.timerDuration ? this.formatRestTimer(exercise.timerDuration) : '';
+        youtubeInput.value = exercise.youtubeLink || '';
+        aerobicCheckbox.checked = exercise.isAerobic || false;
+        
+        // Change button to "Update"
+        addBtn.textContent = 'Update Exercise';
+        addBtn.dataset.editIndex = index;
+        
+        // Scroll to form
+        nameInput.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+        nameInput.focus();
+        
+        // Update button handler temporarily
+        addBtn.onclick = () => {
+            this.updateExerciseConfiguration(index);
+        };
+    }
+
+    updateExerciseConfiguration(index) {
+        const normalizedList = this.normalizeExerciseList(this.exerciseList);
+        if (index < 0 || index >= normalizedList.length) return;
+        
+        const nameInput = document.getElementById('new-exercise-name');
+        const timerInput = document.getElementById('new-exercise-timer');
+        const youtubeInput = document.getElementById('new-exercise-youtube');
+        const aerobicCheckbox = document.getElementById('new-exercise-aerobic');
+        const addBtn = document.getElementById('add-exercise-config');
+        
+        if (!nameInput || !timerInput || !youtubeInput || !aerobicCheckbox || !addBtn) return;
+        
+        const name = nameInput.value.trim();
+        if (!name) {
+            alert('Please enter an exercise name');
+            return;
+        }
+        
+        const timerStr = timerInput.value.trim();
+        const timerDuration = timerStr ? (this.parseRestTimer(timerStr) || this.defaultTimer) : this.defaultTimer;
+        const youtubeLink = youtubeInput.value.trim();
+        const isAerobic = aerobicCheckbox.checked;
+        
+        // Update exercise in list
+        this.exerciseList[index] = {
+            name: name,
+            timerDuration: timerDuration,
+            youtubeLink: youtubeLink,
+            isAerobic: isAerobic
+        };
+        
+        // Save to Google Sheets
+        this.saveExerciseList();
+        this.updateExerciseList();
+        
+        // Clear form and reset button
+        nameInput.value = '';
+        timerInput.value = '';
+        youtubeInput.value = '';
+        aerobicCheckbox.checked = false;
+        addBtn.textContent = 'Add Exercise';
+        delete addBtn.dataset.editIndex;
+        addBtn.onclick = () => this.addExerciseConfiguration();
+        
+        // Re-render list
+        this.renderExerciseConfigList();
+        
+        alert('Exercise updated successfully!');
+    }
+
+    deleteExerciseConfiguration(index) {
+        const normalizedList = this.normalizeExerciseList(this.exerciseList);
+        if (index < 0 || index >= normalizedList.length) return;
+        
+        const exercise = normalizedList[index];
+        
+        if (!confirm(`Are you sure you want to delete "${exercise.name}"? This will not delete workout history, only the exercise configuration.`)) {
+            return;
+        }
+        
+        // Remove from list
+        this.exerciseList.splice(index, 1);
+        
+        // Save to Google Sheets
+        this.saveExerciseList();
+        this.updateExerciseList();
+        
+        // Re-render list
+        this.renderExerciseConfigList();
+        
+        alert('Exercise deleted successfully!');
+    }
+
     updateRepsInputs() {
-        const sets = parseInt(document.getElementById('sets').value) || 3;
         const container = document.getElementById('reps-container');
         container.innerHTML = '';
         
-        for (let i = 1; i <= sets; i++) {
+        // Check if selected exercise is aerobic
+        const select = document.getElementById('exercise-name');
+        const exerciseName = select ? select.value.trim() : '';
+        const exercise = exerciseName ? this.getExerciseByName(exerciseName) : null;
+        const isAerobic = exercise && exercise.isAerobic;
+        
+        // Get the label element to update it
+        const labelElement = container.parentElement.querySelector('label');
+        if (labelElement) {
+            if (isAerobic) {
+                labelElement.textContent = 'Duration (H:M:S)';
+                labelElement.querySelector('small')?.remove();
+            } else {
+                labelElement.innerHTML = 'Reps and Weight for Each Set <small style="color: #999; font-weight: normal;">(can be different)</small>';
+            }
+        }
+        
+        if (isAerobic) {
+            // Show duration input for aerobic exercises
             const group = document.createElement('div');
             group.className = 'rep-input-group';
             group.innerHTML = `
-                <label>Set ${i}:</label>
-                <div style="display: flex; gap: 10px; align-items: center;">
-                    <input type="number" class="rep-input" data-set="${i}" placeholder="Reps" min="0" value="0" style="width: 80px;">
-                    <span>×</span>
-                    <input type="number" class="weight-input" data-set="${i}" placeholder="Weight (kg)" min="0" step="0.5" value="0" style="width: 100px;">
-                </div>
+                <label>Duration:</label>
+                <input type="text" id="exercise-duration" class="exercise-duration-input" placeholder="0:30:00" pattern="[0-9]+:[0-5][0-9]:[0-5][0-9]|[0-9]+:[0-5][0-9]" style="flex: 1;">
+                <small class="help-text" style="display: block; margin-top: 5px; color: #999;">Format: H:M:S or M:S (e.g., 0:30:00 for 30 minutes)</small>
             `;
             container.appendChild(group);
+            
+            // Hide sets input for aerobic exercises
+            const setsInput = document.getElementById('sets');
+            if (setsInput && setsInput.parentElement) {
+                setsInput.parentElement.style.display = 'none';
+            }
+        } else {
+            // Show normal reps/weight inputs
+            const sets = parseInt(document.getElementById('sets').value) || 3;
+            
+            // Show sets input for non-aerobic exercises
+            const setsInput = document.getElementById('sets');
+            if (setsInput && setsInput.parentElement) {
+                setsInput.parentElement.style.display = 'block';
+            }
+            
+            for (let i = 1; i <= sets; i++) {
+                const group = document.createElement('div');
+                group.className = 'rep-input-group';
+                group.innerHTML = `
+                    <label>Set ${i}:</label>
+                    <div style="display: flex; gap: 10px; align-items: center;">
+                        <input type="number" class="rep-input" data-set="${i}" placeholder="Reps" min="0" value="0" style="width: 80px;">
+                        <span>×</span>
+                        <input type="number" class="weight-input" data-set="${i}" placeholder="Weight (kg)" min="0" step="0.5" value="0" style="width: 100px;">
+                    </div>
+                `;
+                container.appendChild(group);
+            }
         }
     }
 
@@ -913,8 +1313,13 @@ class WorkoutTracker {
         }
 
         // Add to exercise list if not already there
-        if (!this.exerciseList.includes(exerciseName)) {
-            this.exerciseList.push(exerciseName);
+        if (!this.exerciseListIncludes(exerciseName)) {
+            this.exerciseList.push({
+                name: exerciseName,
+                timerDuration: this.defaultTimer,
+                youtubeLink: '',
+                isAerobic: false
+            });
             // Don't sort - keep in sheet order
             this.saveExerciseList(); // Async, but fire-and-forget
             this.updateExerciseList();
@@ -936,8 +1341,13 @@ class WorkoutTracker {
         if (newInputValue && (newInput.style.display === 'block' || newInput.offsetParent !== null)) {
             exerciseName = newInputValue;
             // Add it to the list (at the end, preserving order)
-            if (!this.exerciseList.includes(exerciseName)) {
-                this.exerciseList.push(exerciseName);
+            if (!this.exerciseListIncludes(exerciseName)) {
+                this.exerciseList.push({
+                    name: exerciseName,
+                    timerDuration: this.defaultTimer,
+                    youtubeLink: '',
+                    isAerobic: false
+                });
                 // Don't sort - keep in sheet order
                 this.saveExerciseList(); // Async, but fire-and-forget
             }
@@ -947,7 +1357,6 @@ class WorkoutTracker {
             this.updateExerciseList();
         }
 
-        const sets = parseInt(document.getElementById('sets').value) || 3;
         const difficulty = 'medium'; // Default difficulty (field removed from UI)
         const notes = document.getElementById('notes').value.trim();
 
@@ -956,24 +1365,52 @@ class WorkoutTracker {
             return;
         }
 
-        const reps = [];
-        const weights = [];
-        document.querySelectorAll('.rep-input').forEach(input => {
-            reps.push(parseInt(input.value) || 0);
-        });
-        document.querySelectorAll('.weight-input').forEach(input => {
-            weights.push(parseFloat(input.value) || 0);
-        });
+        // Check if exercise is aerobic
+        const exerciseConfig = this.getExerciseByName(exerciseName);
+        const isAerobic = exerciseConfig && exerciseConfig.isAerobic;
 
-        const exercise = {
-            name: exerciseName,
-            weights: weights, // Array of weights, one per set
-            sets: sets,
-            reps: reps,
-            difficulty: difficulty,
-            notes: notes,
-            timestamp: new Date().toISOString()
-        };
+        let exercise;
+        if (isAerobic) {
+            // Handle aerobic exercise - get duration
+            const durationInput = document.getElementById('exercise-duration');
+            const durationStr = durationInput ? durationInput.value.trim() : '';
+            const durationSeconds = durationStr ? this.parseExerciseDuration(durationStr) : null;
+            
+            if (!durationSeconds && durationSeconds !== 0) {
+                alert('Please enter a valid duration (H:M:S or M:S format)');
+                return;
+            }
+
+            exercise = {
+                name: exerciseName,
+                duration: durationSeconds, // Duration in seconds
+                isAerobic: true,
+                difficulty: difficulty,
+                notes: notes,
+                timestamp: new Date().toISOString()
+            };
+        } else {
+            // Handle non-aerobic exercise - get reps and weights
+            const sets = parseInt(document.getElementById('sets').value) || 3;
+            const reps = [];
+            const weights = [];
+            document.querySelectorAll('.rep-input').forEach(input => {
+                reps.push(parseInt(input.value) || 0);
+            });
+            document.querySelectorAll('.weight-input').forEach(input => {
+                weights.push(parseFloat(input.value) || 0);
+            });
+
+            exercise = {
+                name: exerciseName,
+                weights: weights, // Array of weights, one per set
+                sets: sets,
+                reps: reps,
+                difficulty: difficulty,
+                notes: notes,
+                timestamp: new Date().toISOString()
+            };
+        }
 
         // Add to today's session
         if (!this.currentSession.exercises) {
@@ -991,14 +1428,22 @@ class WorkoutTracker {
         }
 
         // Add exercise to list if not already there (at the end, preserving order)
-        if (!this.exerciseList.includes(exerciseName)) {
-            this.exerciseList.push(exerciseName);
+        if (!this.exerciseListIncludes(exerciseName)) {
+            this.exerciseList.push({
+                name: exerciseName,
+                timerDuration: this.defaultTimer,
+                youtubeLink: '',
+                isAerobic: false
+            });
             // Don't sort - keep in sheet order
             this.saveExerciseList();
         }
 
         // Remove exercise from list after saving (it will be repopulated when session starts/ends)
-        const exerciseIndex = this.exerciseList.indexOf(exerciseName);
+        const exerciseIndex = this.exerciseList.findIndex(ex => {
+            const name = typeof ex === 'object' ? ex.name : ex;
+            return name === exerciseName;
+        });
         if (exerciseIndex > -1) {
             this.exerciseList.splice(exerciseIndex, 1);
         }
@@ -1086,14 +1531,21 @@ class WorkoutTracker {
         const daysAgo = Math.floor((new Date() - lastDate) / (1000 * 60 * 60 * 24));
         const daysAgoText = daysAgo === 0 ? 'Today' : daysAgo === 1 ? 'Yesterday' : `${daysAgo} days ago`;
 
-        const lastWeights = lastExercise.weights || (lastExercise.weight ? Array(lastExercise.reps.length).fill(lastExercise.weight) : []);
-        const weightStr = lastWeights.map((w, i) => `${lastExercise.reps[i] || 0} reps × ${w || 0}kg`).join(', ');
+        let detailsStr = '';
+        if (lastExercise.isAerobic && lastExercise.duration !== undefined) {
+            // Show duration for aerobic exercises
+            detailsStr = `Duration: ${this.formatExerciseDuration(lastExercise.duration)}`;
+        } else {
+            // Show reps/weights for non-aerobic exercises
+            const lastWeights = lastExercise.weights || (lastExercise.weight ? Array(lastExercise.reps.length).fill(lastExercise.weight) : []);
+            detailsStr = lastWeights.map((w, i) => `${lastExercise.reps[i] || 0} reps × ${w || 0}kg`).join(', ');
+        }
         
         let html = `
             <div class="recommendation-item">
                 <h4>${exerciseName}</h4>
                 <p class="current"><strong>Last time:</strong> ${dateStr} (${daysAgoText})</p>
-                <p class="current">${weightStr} | ${this.formatDifficulty(lastExercise.difficulty)}</p>
+                <p class="current">${detailsStr} | ${this.formatDifficulty(lastExercise.difficulty)}</p>
         `;
 
         // Get recommendations if we have 2+ sessions
@@ -1116,58 +1568,69 @@ class WorkoutTracker {
     }
 
     populateFormFromLastExercise(lastExercise) {
-        // Debug logging
-        console.log('populateFormFromLastExercise called with:', {
-            name: lastExercise.name,
-            sets: lastExercise.sets,
-            setsType: typeof lastExercise.sets,
-            isArray: Array.isArray(lastExercise.sets),
-            reps: lastExercise.reps,
-            repsLength: lastExercise.reps?.length,
-            weights: lastExercise.weights,
-            weightsLength: lastExercise.weights?.length
-        });
-        
-        // Ensure sets is a number, not an array
-        let numSets = 3;
-        if (Array.isArray(lastExercise.sets)) {
-            numSets = lastExercise.sets.length;
-            console.log('Sets is array, length:', numSets);
-        } else if (typeof lastExercise.sets === 'number') {
-            numSets = lastExercise.sets;
-            console.log('Sets is number:', numSets);
-            // Cap at reasonable maximum
-            if (numSets > 20) {
-                console.warn('Sets value too high:', numSets, 'capping at reps length or 20');
-                numSets = lastExercise.reps?.length || Math.min(numSets, 20);
+        // Check if exercise is aerobic
+        if (lastExercise.isAerobic && lastExercise.duration !== undefined) {
+            // Handle aerobic exercise - populate duration
+            this.updateRepsInputs(); // This will show duration input for aerobic exercises
+            const durationInput = document.getElementById('exercise-duration');
+            if (durationInput) {
+                durationInput.value = this.formatExerciseDuration(lastExercise.duration);
             }
-        } else if (lastExercise.reps && Array.isArray(lastExercise.reps)) {
-            numSets = lastExercise.reps.length;
-            console.log('Using reps length as sets:', numSets);
-        }
-        
-        console.log('Final numSets:', numSets);
-        
-        // Set sets (this will trigger updateRepsInputs)
-        document.getElementById('sets').value = numSets;
-        
-        // Update reps inputs first (creates the right number of inputs)
-        this.updateRepsInputs();
-        
-        // Then populate each rep input and weight input
-        const repInputs = document.querySelectorAll('.rep-input');
-        const weightInputs = document.querySelectorAll('.weight-input');
-        const weights = lastExercise.weights || (lastExercise.weight ? Array(lastExercise.reps.length).fill(lastExercise.weight) : []);
-        
-        if (lastExercise.reps && lastExercise.reps.length > 0) {
-            lastExercise.reps.forEach((rep, index) => {
-                if (repInputs[index]) {
-                    repInputs[index].value = rep || 0;
-                }
-                if (weightInputs[index]) {
-                    weightInputs[index].value = weights[index] || 0;
-                }
+        } else {
+            // Handle non-aerobic exercise - populate reps and weights
+            // Debug logging
+            console.log('populateFormFromLastExercise called with:', {
+                name: lastExercise.name,
+                sets: lastExercise.sets,
+                setsType: typeof lastExercise.sets,
+                isArray: Array.isArray(lastExercise.sets),
+                reps: lastExercise.reps,
+                repsLength: lastExercise.reps?.length,
+                weights: lastExercise.weights,
+                weightsLength: lastExercise.weights?.length
             });
+            
+            // Ensure sets is a number, not an array
+            let numSets = 3;
+            if (Array.isArray(lastExercise.sets)) {
+                numSets = lastExercise.sets.length;
+                console.log('Sets is array, length:', numSets);
+            } else if (typeof lastExercise.sets === 'number') {
+                numSets = lastExercise.sets;
+                console.log('Sets is number:', numSets);
+                // Cap at reasonable maximum
+                if (numSets > 20) {
+                    console.warn('Sets value too high:', numSets, 'capping at reps length or 20');
+                    numSets = lastExercise.reps?.length || Math.min(numSets, 20);
+                }
+            } else if (lastExercise.reps && Array.isArray(lastExercise.reps)) {
+                numSets = lastExercise.reps.length;
+                console.log('Using reps length as sets:', numSets);
+            }
+            
+            console.log('Final numSets:', numSets);
+            
+            // Set sets (this will trigger updateRepsInputs)
+            document.getElementById('sets').value = numSets;
+            
+            // Update reps inputs first (creates the right number of inputs)
+            this.updateRepsInputs();
+            
+            // Then populate each rep input and weight input
+            const repInputs = document.querySelectorAll('.rep-input');
+            const weightInputs = document.querySelectorAll('.weight-input');
+            const weights = lastExercise.weights || (lastExercise.weight ? Array(lastExercise.reps.length).fill(lastExercise.weight) : []);
+            
+            if (lastExercise.reps && lastExercise.reps.length > 0) {
+                lastExercise.reps.forEach((rep, index) => {
+                    if (repInputs[index]) {
+                        repInputs[index].value = rep || 0;
+                    }
+                    if (weightInputs[index]) {
+                        weightInputs[index].value = weights[index] || 0;
+                    }
+                });
+            }
         }
         
         // Keep notes clear - don't prefill them
@@ -1405,6 +1868,20 @@ class WorkoutTracker {
             this.restTimer = null;
         }
         
+        // Get the last exercise name to check for exercise-specific timer
+        let timerDuration = this.defaultTimer;
+        if (this.currentSession.exercises && this.currentSession.exercises.length > 0) {
+            const lastExerciseName = this.currentSession.exercises[this.currentSession.exercises.length - 1].name;
+            const exercise = this.getExerciseByName(lastExerciseName);
+            if (exercise && exercise.timerDuration) {
+                timerDuration = exercise.timerDuration;
+            } else {
+                timerDuration = this.restTimerDuration || this.defaultTimer;
+            }
+        } else {
+            timerDuration = this.restTimerDuration || this.defaultTimer;
+        }
+        
         // Reset display elements
         const timerDisplay = document.getElementById('timer-seconds');
         const timerLabel = document.querySelector('.timer-label');
@@ -1420,8 +1897,8 @@ class WorkoutTracker {
             skipBtn.style.display = 'block';
         }
         
-        // Set timer duration (60 seconds default, can be customized)
-        this.restTimerSeconds = this.restTimerDuration;
+        // Set timer duration
+        this.restTimerSeconds = timerDuration;
         
         // Show timer display
         const timerContainer = document.getElementById('rest-timer');
@@ -1476,8 +1953,14 @@ class WorkoutTracker {
 
     updateTimerDisplay() {
         const timerDisplay = document.getElementById('timer-seconds');
+        const timerLabel = document.querySelector('.timer-label');
         if (timerDisplay) {
-            timerDisplay.textContent = this.restTimerSeconds;
+            // Display in M:S format
+            const formatted = this.formatRestTimer(this.restTimerSeconds);
+            timerDisplay.textContent = formatted;
+            if (timerLabel) {
+                timerLabel.textContent = '';
+            }
         }
     }
 
@@ -1537,6 +2020,94 @@ class WorkoutTracker {
         return map[difficulty] || difficulty;
     }
 
+    // Format seconds to M:S for rest timer display
+    formatRestTimer(seconds) {
+        const mins = Math.floor(seconds / 60);
+        const secs = seconds % 60;
+        return `${mins}:${secs.toString().padStart(2, '0')}`;
+    }
+
+    // Parse M:S format to seconds for rest timer input
+    parseRestTimer(timeStr) {
+        if (!timeStr || !timeStr.trim()) return null;
+        const parts = timeStr.trim().split(':');
+        if (parts.length !== 2) return null;
+        const mins = parseInt(parts[0], 10);
+        const secs = parseInt(parts[1], 10);
+        if (isNaN(mins) || isNaN(secs) || secs < 0 || secs > 59) return null;
+        return mins * 60 + secs;
+    }
+
+    // Format seconds to H:M:S for exercise duration display
+    formatExerciseDuration(seconds) {
+        const hours = Math.floor(seconds / 3600);
+        const mins = Math.floor((seconds % 3600) / 60);
+        const secs = seconds % 60;
+        if (hours > 0) {
+            return `${hours}:${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+        }
+        return `${mins}:${secs.toString().padStart(2, '0')}`;
+    }
+
+    // Parse H:M:S or M:S format to seconds for exercise duration input
+    parseExerciseDuration(timeStr) {
+        if (!timeStr || !timeStr.trim()) return null;
+        const parts = timeStr.trim().split(':');
+        if (parts.length === 2) {
+            // M:S format
+            const mins = parseInt(parts[0], 10);
+            const secs = parseInt(parts[1], 10);
+            if (isNaN(mins) || isNaN(secs) || secs < 0 || secs > 59) return null;
+            return mins * 60 + secs;
+        } else if (parts.length === 3) {
+            // H:M:S format
+            const hours = parseInt(parts[0], 10);
+            const mins = parseInt(parts[1], 10);
+            const secs = parseInt(parts[2], 10);
+            if (isNaN(hours) || isNaN(mins) || isNaN(secs) || mins < 0 || mins > 59 || secs < 0 || secs > 59) return null;
+            return hours * 3600 + mins * 60 + secs;
+        }
+        return null;
+    }
+
+    // Helper to get exercise object by name
+    getExerciseByName(name) {
+        if (!name) return null;
+        return this.exerciseList.find(ex => typeof ex === 'object' ? ex.name === name : ex === name);
+    }
+
+    // Helper to check if exercise name exists in list (works with both string and object arrays)
+    exerciseListIncludes(name) {
+        if (!name) return false;
+        return this.exerciseList.some(ex => {
+            if (typeof ex === 'string') return ex === name;
+            return ex.name === name;
+        });
+    }
+
+    // Helper to convert string array to object array (for migration)
+    normalizeExerciseList(list) {
+        if (!list || list.length === 0) return [];
+        return list.map(item => {
+            if (typeof item === 'string') {
+                // Migrate from old string format
+                return {
+                    name: item,
+                    timerDuration: this.defaultTimer,
+                    youtubeLink: '',
+                    isAerobic: false
+                };
+            }
+            // Already an object, ensure all fields exist
+            return {
+                name: item.name || '',
+                timerDuration: item.timerDuration || this.defaultTimer,
+                youtubeLink: item.youtubeLink || '',
+                isAerobic: item.isAerobic || false
+            };
+        });
+    }
+
     renderTodayWorkout() {
         const container = document.getElementById('today-exercises');
         if (!this.currentSession.exercises || this.currentSession.exercises.length === 0) {
@@ -1546,13 +2117,24 @@ class WorkoutTracker {
 
         let html = '';
         this.currentSession.exercises.forEach((exercise, index) => {
-            const weights = exercise.weights || (exercise.weight ? Array(exercise.reps.length).fill(exercise.weight) : []);
-            const weightDetails = weights.map((w, i) => `Set ${i + 1}: ${exercise.reps[i] || 0} reps × ${w || 0}kg`).join(', ');
+            let detailsHtml = '';
+            
+            // Check if exercise is aerobic
+            if (exercise.isAerobic && exercise.duration !== undefined) {
+                // Show duration for aerobic exercises
+                const durationStr = this.formatExerciseDuration(exercise.duration);
+                detailsHtml = `<div class="details">Duration: ${durationStr}</div>`;
+            } else {
+                // Show reps/weights for non-aerobic exercises
+                const weights = exercise.weights || (exercise.weight ? Array(exercise.reps.length).fill(exercise.weight) : []);
+                const weightDetails = weights.map((w, i) => `Set ${i + 1}: ${exercise.reps[i] || 0} reps × ${w || 0}kg`).join(', ');
+                detailsHtml = `<div class="details">${weightDetails}</div>`;
+            }
             
             html += `
                 <div class="exercise-card">
                     <h4>${exercise.name}</h4>
-                    <div class="details">${weightDetails}</div>
+                    ${detailsHtml}
                     <div class="details">Difficulty: ${this.formatDifficulty(exercise.difficulty)}</div>
                     ${exercise.notes ? `<div class="details">Notes: ${exercise.notes}</div>` : ''}
                 </div>
@@ -1766,44 +2348,53 @@ class WorkoutTracker {
             
             if (session.exercises && session.exercises.length > 0) {
                 session.exercises.forEach(ex => {
-                    const weights = ex.weights || (ex.weight ? Array(ex.reps.length).fill(ex.weight) : []);
-                    const reps = ex.reps || [];
-                    
-                    // Format: show weight only if > 0, otherwise just show reps
-                    // For bodyweight exercises, if all reps are the same, just show "8 reps" instead of "8 reps, 8 reps"
-                    const hasWeight = weights.some(w => w > 0);
                     let detailsStr = '';
                     
-                    if (hasWeight) {
-                        // Exercise with weights - show each set with weight
-                        const setStrings = [];
-                        for (let i = 0; i < Math.max(reps.length, weights.length); i++) {
-                            const rep = reps[i] || 0;
-                            const weight = weights[i] || 0;
-                            if (weight > 0) {
-                                setStrings.push(`${rep}×${weight}kg`);
-                            } else if (rep > 0) {
-                                setStrings.push(`${rep} reps`);
-                            }
-                        }
-                        detailsStr = setStrings.join(', ');
+                    // Check if exercise is aerobic
+                    if (ex.isAerobic && ex.duration !== undefined) {
+                        // Show duration for aerobic exercises
+                        const durationStr = this.formatExerciseDuration(ex.duration);
+                        detailsStr = `Duration: ${durationStr}`;
                     } else {
-                        // Bodyweight exercise - show each set or use multiplication format
-                        const validReps = reps.filter(r => r > 0);
-                        if (validReps.length === 0) {
-                            detailsStr = '';
-                        } else if (validReps.length === 1) {
-                            // Single set
-                            detailsStr = `${validReps[0]} reps`;
+                        // Show reps/weights for non-aerobic exercises
+                        const weights = ex.weights || (ex.weight ? Array(ex.reps.length).fill(ex.weight) : []);
+                        const reps = ex.reps || [];
+                        
+                        // Format: show weight only if > 0, otherwise just show reps
+                        // For bodyweight exercises, if all reps are the same, just show "8 reps" instead of "8 reps, 8 reps"
+                        const hasWeight = weights.some(w => w > 0);
+                        
+                        if (hasWeight) {
+                            // Exercise with weights - show each set with weight
+                            const setStrings = [];
+                            for (let i = 0; i < Math.max(reps.length, weights.length); i++) {
+                                const rep = reps[i] || 0;
+                                const weight = weights[i] || 0;
+                                if (weight > 0) {
+                                    setStrings.push(`${rep}×${weight}kg`);
+                                } else if (rep > 0) {
+                                    setStrings.push(`${rep} reps`);
+                                }
+                            }
+                            detailsStr = setStrings.join(', ');
                         } else {
-                            // Multiple sets - check if all same
-                            const uniqueReps = [...new Set(validReps)];
-                            if (uniqueReps.length === 1) {
-                                // All sets have same reps - show "2 × 8 reps"
-                                detailsStr = `${validReps.length} × ${uniqueReps[0]} reps`;
+                            // Bodyweight exercise - show each set or use multiplication format
+                            const validReps = reps.filter(r => r > 0);
+                            if (validReps.length === 0) {
+                                detailsStr = '';
+                            } else if (validReps.length === 1) {
+                                // Single set
+                                detailsStr = `${validReps[0]} reps`;
                             } else {
-                                // Different reps per set - show "8 reps, 10 reps"
-                                detailsStr = validReps.map(r => `${r} reps`).join(', ');
+                                // Multiple sets - check if all same
+                                const uniqueReps = [...new Set(validReps)];
+                                if (uniqueReps.length === 1) {
+                                    // All sets have same reps - show "2 × 8 reps"
+                                    detailsStr = `${validReps.length} × ${uniqueReps[0]} reps`;
+                                } else {
+                                    // Different reps per set - show "8 reps, 10 reps"
+                                    detailsStr = validReps.map(r => `${r} reps`).join(', ');
+                                }
                             }
                         }
                     }
@@ -1965,7 +2556,8 @@ class WorkoutTracker {
                 await this.initGoogleSheets();
                 const sheetExercises = await this.loadExerciseListFromSheet();
                 if (sheetExercises && sheetExercises.length > 0) {
-                    return sheetExercises;
+                    // Normalize to ensure all are objects
+                    return this.normalizeExerciseList(sheetExercises);
                 }
             } catch (error) {
                 console.warn('Error loading exercise list from sheet:', error);
@@ -2021,11 +2613,20 @@ class WorkoutTracker {
             // Get or create Exercises tab
             let exercisesTabName = await this.getExercisesTabName();
             
+            // Normalize exercise list to ensure it's an array of objects
+            const normalizedList = this.normalizeExerciseList(this.exerciseList);
+            
             // Try to write to Exercises tab, create if it doesn't exist
             try {
-                const rows = [['Exercise Name']]; // Header
-                this.exerciseList.forEach(exercise => {
-                    rows.push([exercise]);
+                const rows = [['Exercise Name', 'Rest Timer (M:S)', 'YouTube Link', 'Is Aerobic']]; // Header
+                normalizedList.forEach(exercise => {
+                    const timerStr = exercise.timerDuration ? this.formatRestTimer(exercise.timerDuration) : '';
+                    rows.push([
+                        exercise.name,
+                        timerStr,
+                        exercise.youtubeLink || '',
+                        exercise.isAerobic ? 'true' : 'false'
+                    ]);
                 });
 
                 const escapedTabName = this.escapeSheetTabName(exercisesTabName);
@@ -2042,9 +2643,15 @@ class WorkoutTracker {
                     await this.createExercisesSheet();
                     exercisesTabName = 'Exercises';
                     // Retry
-                    const rows = [['Exercise Name']];
-                    this.exerciseList.forEach(exercise => {
-                        rows.push([exercise]);
+                    const rows = [['Exercise Name', 'Rest Timer (M:S)', 'YouTube Link', 'Is Aerobic']];
+                    normalizedList.forEach(exercise => {
+                        const timerStr = exercise.timerDuration ? this.formatRestTimer(exercise.timerDuration) : '';
+                        rows.push([
+                            exercise.name,
+                            timerStr,
+                            exercise.youtubeLink || '',
+                            exercise.isAerobic ? 'true' : 'false'
+                        ]);
                     });
                     const escapedTabName = this.escapeSheetTabName('Exercises');
                     await gapi.client.sheets.spreadsheets.values.update({
@@ -2074,7 +2681,7 @@ class WorkoutTracker {
                                 title: 'Exercises',
                                 gridProperties: {
                                     rowCount: 1000,
-                                    columnCount: 1
+                                    columnCount: 4
                                 }
                             }
                         }
@@ -2112,17 +2719,58 @@ class WorkoutTracker {
             }
             
             const escapedTabName = this.escapeSheetTabName(exercisesTabName);
+            // Load all columns (A:D) for exercise configuration
             const response = await gapi.client.sheets.spreadsheets.values.get({
                 spreadsheetId: this.sheetId,
-                range: `${escapedTabName}!A2:A1000` // Skip header row
+                range: `${escapedTabName}!A2:D1000` // Skip header row, load columns A-D
             });
 
             const rows = response.result.values || [];
             console.log('Exercise rows loaded from sheet:', rows.length);
             if (rows.length > 0) {
                 const exercises = rows
-                    .map(row => row[0]?.trim())
-                    .filter(name => name && name.length > 0);
+                    .map(row => {
+                        const name = row[0]?.trim();
+                        if (!name || name.length === 0) return null;
+                        
+                        // Parse exercise object
+                        const exercise = {
+                            name: name,
+                            timerDuration: this.defaultTimer,
+                            youtubeLink: '',
+                            isAerobic: false
+                        };
+                        
+                        // Column B: Timer Duration (seconds, or M:S format)
+                        if (row[1] !== undefined && row[1] !== null && row[1] !== '') {
+                            const timerStr = String(row[1]).trim();
+                            const parsed = this.parseRestTimer(timerStr);
+                            if (parsed !== null) {
+                                exercise.timerDuration = parsed;
+                            } else {
+                                // Try parsing as number (seconds)
+                                const num = parseInt(timerStr, 10);
+                                if (!isNaN(num) && num > 0) {
+                                    exercise.timerDuration = num;
+                                }
+                            }
+                        }
+                        
+                        // Column C: YouTube Link
+                        if (row[2] !== undefined && row[2] !== null && row[2] !== '') {
+                            exercise.youtubeLink = String(row[2]).trim();
+                        }
+                        
+                        // Column D: Is Aerobic
+                        if (row[3] !== undefined && row[3] !== null && row[3] !== '') {
+                            const aerobicStr = String(row[3]).trim().toLowerCase();
+                            exercise.isAerobic = aerobicStr === 'true' || aerobicStr === '1' || aerobicStr === 'yes';
+                        }
+                        
+                        return exercise;
+                    })
+                    .filter(ex => ex !== null);
+                
                 // Keep exercises in the same order as they appear in the sheet (no sorting)
                 console.log('Exercises loaded from sheet:', exercises.length, exercises.slice(0, 5));
                 return exercises;
@@ -2143,6 +2791,9 @@ class WorkoutTracker {
         
         const currentValue = select.value;
         
+        // Normalize exercise list to ensure it's an array of objects
+        this.exerciseList = this.normalizeExerciseList(this.exerciseList);
+        
         // Merge exercises from sessions with saved list
         const exercisesFromSessions = new Set();
         this.sessions.forEach(session => {
@@ -2157,9 +2808,15 @@ class WorkoutTracker {
         // Combine saved list with exercises from sessions, preserving order
         // Start with saved list, then add any from sessions that aren't already there
         const allExercises = [...this.exerciseList];
-        exercisesFromSessions.forEach(ex => {
-            if (!allExercises.includes(ex)) {
-                allExercises.push(ex);
+        exercisesFromSessions.forEach(exName => {
+            if (!this.exerciseListIncludes(exName)) {
+                // Add new exercise from session with default values
+                allExercises.push({
+                    name: exName,
+                    timerDuration: this.defaultTimer,
+                    youtubeLink: '',
+                    isAerobic: false
+                });
             }
         });
         
@@ -2175,13 +2832,14 @@ class WorkoutTracker {
 
         // Update select dropdown with color coding
         select.innerHTML = '<option value="">Select or type to add new...</option>';
-        this.exerciseList.forEach(name => {
+        this.exerciseList.forEach(exercise => {
+            const exerciseName = typeof exercise === 'object' ? exercise.name : exercise;
             const option = document.createElement('option');
-            option.value = name;
-            option.textContent = name;
+            option.value = exerciseName;
+            option.textContent = exerciseName;
             
             // Check if exercise was completed twice with same parameters
-            const completedTwice = this.checkExerciseCompletedTwice(name);
+            const completedTwice = this.checkExerciseCompletedTwice(exerciseName);
             if (completedTwice) {
                 option.style.color = '#4caf50'; // Green
             } else {
@@ -2194,7 +2852,7 @@ class WorkoutTracker {
         console.log('updateExerciseList: Dropdown updated with', select.options.length, 'options');
 
         // Restore previous selection if it still exists
-        if (currentValue && this.exerciseList.includes(currentValue)) {
+        if (currentValue && this.exerciseListIncludes(currentValue)) {
             select.value = currentValue;
         }
     }
