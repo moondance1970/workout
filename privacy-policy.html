@@ -1,0 +1,163 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Privacy Policy - Workout Tracker</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+            color: #333;
+            line-height: 1.6;
+        }
+
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 20px;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+            padding: 40px;
+        }
+
+        h1 {
+            color: #667eea;
+            margin-bottom: 10px;
+            font-size: 32px;
+        }
+
+        h2 {
+            color: #764ba2;
+            margin-top: 30px;
+            margin-bottom: 15px;
+            font-size: 24px;
+        }
+
+        p {
+            margin-bottom: 15px;
+        }
+
+        ul {
+            margin-left: 30px;
+            margin-bottom: 15px;
+        }
+
+        li {
+            margin-bottom: 8px;
+        }
+
+        .last-updated {
+            color: #666;
+            font-style: italic;
+            margin-bottom: 30px;
+        }
+
+        .contact {
+            background: #f8f9fa;
+            padding: 20px;
+            border-radius: 10px;
+            margin-top: 30px;
+        }
+
+        .contact h2 {
+            margin-top: 0;
+        }
+
+        a {
+            color: #667eea;
+            text-decoration: none;
+        }
+
+        a:hover {
+            text-decoration: underline;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Privacy Policy</h1>
+        <p class="last-updated"><strong>Last updated:</strong> <span id="current-date"></span></p>
+        
+        <h2>Introduction</h2>
+        <p>Workout Tracker ("we", "our", or "the app") is committed to protecting your privacy. This Privacy Policy explains how we collect, use, and safeguard your information when you use our application.</p>
+        
+        <h2>Data Collection and Access</h2>
+        <p>Workout Tracker accesses your Google account to provide the following services:</p>
+        <ul>
+            <li><strong>Google Sheets Access:</strong> The app reads and writes data to your Google Sheets to store your workout sessions, exercise configurations, and workout plans.</li>
+            <li><strong>Google Drive Access (Read-Only):</strong> The app searches your Google Drive to find existing workout sheets you may have created, allowing you to connect to your existing data.</li>
+            <li><strong>Email Address:</strong> The app accesses your email address to identify your account and associate your workout data with your Google account. This allows the app to automatically connect to your workout sheet when you sign in.</li>
+        </ul>
+        
+        <h2>Data Storage</h2>
+        <p><strong>All your workout data is stored exclusively in your own Google Sheets.</strong> We do not store, process, or maintain any of your data on external servers. Your data remains in your Google account, and you have complete control over it.</p>
+        
+        <p>Each user's data is stored in their own separate Google Sheet, ensuring complete data isolation and privacy between users.</p>
+        
+        <h2>How We Use Your Data</h2>
+        <p>We use the data we access solely for the following purposes:</p>
+        <ul>
+            <li>Creating and managing your workout tracking sheets</li>
+            <li>Storing your workout sessions, exercises, and progress</li>
+            <li>Managing your exercise configurations (rest timers, YouTube links, etc.)</li>
+            <li>Storing and managing your workout plans</li>
+            <li>Displaying your workout history and progress graphs</li>
+        </ul>
+        
+        <h2>Data Sharing</h2>
+        <p>We do not share, sell, or distribute your data to any third parties. Your workout data is private and remains in your Google account.</p>
+        
+        <p>If you choose to share a workout plan with others using the app's sharing feature, only the plan structure and exercise names are shared. The recipient must sign in with their own Google account, and the plan is imported into their own separate Google Sheet.</p>
+        
+        <h2>Data Security</h2>
+        <p>Your data security is protected by:</p>
+        <ul>
+            <li>Google's robust security infrastructure for Google Sheets and Drive</li>
+            <li>OAuth 2.0 authentication, which ensures only you can access your data</li>
+            <li>No data transmission to external servers - all operations occur directly between your browser and Google's services</li>
+        </ul>
+        
+        <h2>Your Rights</h2>
+        <p>You have complete control over your data:</p>
+        <ul>
+            <li>You can view, edit, or delete your data at any time through Google Sheets</li>
+            <li>You can revoke the app's access to your Google account at any time through your Google Account settings</li>
+            <li>You can delete your workout sheets at any time</li>
+            <li>You are not required to provide any data - you can stop using the app at any time</li>
+        </ul>
+        
+        <h2>Third-Party Services</h2>
+        <p>This app uses Google APIs (Google Sheets API and Google Drive API) to function. Your use of these services is subject to Google's Privacy Policy and Terms of Service.</p>
+        
+        <h2>Children's Privacy</h2>
+        <p>Our app is not intended for children under 13 years of age. We do not knowingly collect personal information from children under 13.</p>
+        
+        <h2>Changes to This Privacy Policy</h2>
+        <p>We may update this Privacy Policy from time to time. We will notify you of any changes by updating the "Last updated" date at the top of this page. You are advised to review this Privacy Policy periodically for any changes.</p>
+        
+        <div class="contact">
+            <h2>Contact Us</h2>
+            <p>If you have any questions about this Privacy Policy or how we handle your data, please contact us through the app or at your registered email address.</p>
+        </div>
+    </div>
+
+    <script>
+        // Set current date
+        document.getElementById('current-date').textContent = new Date().toLocaleDateString('en-US', { 
+            year: 'numeric', 
+            month: 'long', 
+            day: 'numeric' 
+        });
+    </script>
+</body>
+</html>
+
