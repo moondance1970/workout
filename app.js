@@ -2251,10 +2251,20 @@ class WorkoutTracker {
         this.updateExerciseList();
         this.renderTodayWorkout();
         this.showRecommendations(exercise);
-        this.clearForm();
         
-        // Start rest timer after saving exercise
-        this.startRestTimer();
+        // Clear form (wrap in try-catch to prevent errors from stopping timer)
+        try {
+            this.clearForm();
+        } catch (error) {
+            console.error('Error clearing form:', error);
+        }
+        
+        // Start rest timer after saving exercise (always try to start, even if form clearing failed)
+        try {
+            this.startRestTimer();
+        } catch (error) {
+            console.error('Error starting rest timer:', error);
+        }
 
         // Immediately sync to Google Sheets (sheet is source of truth)
         if (this.isSignedIn && this.sheetId) {
@@ -2436,9 +2446,24 @@ class WorkoutTracker {
     }
 
     clearFormFields() {
-        document.getElementById('weight').value = '';
-        document.getElementById('sets').value = '3';
-        document.getElementById('notes').value = '';
+        // Clear sets and notes (these always exist)
+        const setsEl = document.getElementById('sets');
+        if (setsEl) setsEl.value = '3';
+        
+        const notesEl = document.getElementById('notes');
+        if (notesEl) notesEl.value = '';
+        
+        // Clear all dynamic rep and weight inputs
+        const repInputs = document.querySelectorAll('.rep-input');
+        const weightInputs = document.querySelectorAll('.weight-input');
+        repInputs.forEach(input => input.value = '');
+        weightInputs.forEach(input => input.value = '');
+        
+        // Clear duration input if it exists (for aerobic exercises)
+        const durationEl = document.getElementById('duration');
+        if (durationEl) durationEl.value = '';
+        
+        // Update reps inputs to reset the form
         this.updateRepsInputs();
     }
 
