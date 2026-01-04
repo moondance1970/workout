@@ -2644,6 +2644,8 @@ class WorkoutTracker {
     }
 
     startRestTimer() {
+        console.log('startRestTimer called');
+        
         // Stop any existing timer
         if (this.restTimer) {
             clearInterval(this.restTimer);
@@ -2681,15 +2683,20 @@ class WorkoutTracker {
         
         // Set timer duration
         this.restTimerSeconds = timerDuration;
+        console.log('Timer duration set to:', timerDuration, 'seconds');
         
         // Show timer display
         const timerContainer = document.getElementById('rest-timer');
         if (timerContainer) {
             timerContainer.style.display = 'block';
+            console.log('Timer container displayed');
+        } else {
+            console.error('Timer container not found!');
         }
         
         // Update display immediately
         this.updateTimerDisplay();
+        console.log('Timer display updated, starting countdown...');
         
         // Start countdown
         this.restTimer = setInterval(() => {
@@ -2700,6 +2707,7 @@ class WorkoutTracker {
                 this.completeRestTimer();
             }
         }, 1000);
+        console.log('Timer interval started');
     }
 
     stopRestTimer() {
