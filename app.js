@@ -45,6 +45,9 @@ class WorkoutTracker {
             this.isSignedIn = true;
         }
         
+        // Show sign-in button immediately if not signed in
+        this.updateHeaderButtons();
+        
         // Check for plan import from URL parameter
         const urlParams = new URLSearchParams(window.location.search);
         const planParam = urlParams.get('plan');
@@ -636,6 +639,7 @@ class WorkoutTracker {
             if (headerButtonContainer) {
                 headerButtonContainer.innerHTML = '';
                 const signInBtn = document.createElement('button');
+                signInBtn.className = 'btn-primary';
                 signInBtn.style.cssText = 'width: auto; padding: 10px 20px; margin: 0;';
                 signInBtn.textContent = '🔐 Sign in with Google';
                 signInBtn.onclick = () => this.requestAccessToken();
