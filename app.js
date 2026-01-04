@@ -448,8 +448,10 @@ class WorkoutTracker {
         // If no sheet ID exists, search for sheet by name
         if (!userSheetId) {
             try {
+                console.log('No stored sheet ID, searching for sheet by name...');
                 const defaultSheetName = 'Workout Tracker';
                 const matchingSheets = await this.findSheetByName(defaultSheetName);
+                console.log(`Search completed. Found ${matchingSheets.length} matching sheet(s).`);
                 
                 if (matchingSheets.length === 0) {
                     // No sheet found - automatically create a new sheet
@@ -498,6 +500,24 @@ class WorkoutTracker {
                 }
             } catch (error) {
                 console.error('Error searching for sheet:', error);
+                console.error('Error details:', JSON.stringify(error, null, 2));
+                
+                // If Drive API search fails, try creating a new sheet as fallback
+                console.log('Drive search failed, attempting to create new sheet as fallback...');
+                try {
+                    const defaultSheetName = 'Workout Tracker';
+                    userSheetId = await this.createNewSheet(defaultSheetName);
+                    if (userSheetId) {
+                        console.log('Successfully created new sheet as fallback:', userSheetId);
+                        this.saveSheetIdForUser(userEmail, userSheetId);
+                        localStorage.setItem('sheetId', userSheetId);
+                        await this.completeSheetConnection(userSheetId);
+                        return; // Successfully created and connected
+                    }
+                } catch (createError) {
+                    console.error('Failed to create sheet as fallback:', createError);
+                }
+                
                 const sheetStatus = document.getElementById('sheet-status');
                 if (sheetStatus) {
                     let errorMsg = '⚠ Error searching for sheet. ';
@@ -506,7 +526,7 @@ class WorkoutTracker {
                     } else if (error.result?.error) {
                         errorMsg += error.result.error.message || 'Please check your permissions.';
                     } else {
-                        errorMsg += 'Please try clicking "Reconnect to Sheet" below.';
+                        errorMsg += 'Drive API search failed. Please refresh and try again.';
                     }
                     sheetStatus.innerHTML = `<p style="color: orange;">${errorMsg}</p>`;
                 }
@@ -805,12 +825,24 @@ class WorkoutTracker {
             
             // If Sheets API is already initialized, we can add Drive API to the same client
             // Otherwise, initialize both together
-            if (gapi.client.sheets && !gapi.client.drive) {
-                // Sheets already initialized, add Drive API
-                await gapi.client.load('drive', 'v3');
-            } else if (!gapi.client.drive) {
-                // Initialize both APIs together if neither is initialized
-                if (!gapi.client.sheets) {
+            if (!gapi.client.drive) {
+                if (gapi.client.sheets) {
+                    // Sheets already initialized, add Drive API
+                    try {
+                        await gapi.client.load('drive', 'v3');
+                    } catch (loadError) {
+                        console.warn('Failed to load Drive API separately, re-initializing with both APIs:', loadError);
+                        // If loading fails, re-initialize with both APIs
+                        await gapi.client.init({
+                            apiKey: apiKey,
+                            discoveryDocs: [
+                                'https://sheets.googleapis.com/$discovery/rest?version=v4',
+                                'https://www.googleapis.com/discovery/v1/apis/drive/v3/rest'
+                            ],
+                        });
+                    }
+                } else {
+                    // Initialize both APIs together
                     await gapi.client.init({
                         apiKey: apiKey,
                         discoveryDocs: [
@@ -818,9 +850,6 @@ class WorkoutTracker {
                             'https://www.googleapis.com/discovery/v1/apis/drive/v3/rest'
                         ],
                     });
-                } else {
-                    // Just add Drive API
-                    await gapi.client.load('drive', 'v3');
                 }
             }
             
@@ -3810,12 +3839,16 @@ class WorkoutTracker {
             
             // Verify Drive API is loaded
             if (!gapi.client.drive) {
-                console.error('Drive API not loaded, attempting to initialize...');
+                console.warn('Drive API not loaded, attempting to initialize...');
                 await this.initGoogleDrive();
+                // Wait a moment for Drive API to be available
+                await new Promise(resolve => setTimeout(resolve, 500));
                 if (!gapi.client.drive) {
+                    console.error('Drive API still not available after initialization attempt');
                     throw new Error('Google Drive API not available. Please refresh the page and sign in again.');
                 }
             }
+            console.log('Drive API is ready for search');
             
             // Escape single quotes in sheet name for the query
             const escapedName = sheetName.replace(/'/g, "\\'");
