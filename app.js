@@ -52,6 +52,9 @@ class WorkoutTracker {
         
         // Only load data if signed in - keep empty until login
         if (this.isSignedIn) {
+            // Load user info and auto-connect to sheet if already signed in
+            await this.loadUserInfo();
+            
             // Load default timer first
             await this.loadDefaultTimer();
             
