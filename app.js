@@ -199,7 +199,14 @@ class WorkoutTracker {
             const response = await fetch('/api/config');
             if (response.ok) {
                 this.googleConfig = await response.json();
-                return this.googleConfig;
+                // Check if CLIENT_ID is actually set (not empty string)
+                if (this.googleConfig && this.googleConfig.CLIENT_ID) {
+                    return this.googleConfig;
+                } else {
+                    console.error('Config loaded but CLIENT_ID is empty. Check Vercel environment variables: GOOGLE_CLIENT_ID and GOOGLE_API_KEY');
+                }
+            } else {
+                console.error('Config API returned error:', response.status, response.statusText);
             }
         } catch (error) {
             console.error('Error loading config from API:', error);
@@ -211,7 +218,12 @@ class WorkoutTracker {
     async getClientId() {
         // Load config (from local or API)
         const config = await this.loadConfig();
-        return config?.CLIENT_ID || null;
+        const clientId = config?.CLIENT_ID || null;
+        // Check if clientId is not just an empty string
+        if (clientId && clientId.trim() !== '') {
+            return clientId;
+        }
+        return null;
     }
 
     async getApiKey() {
@@ -244,7 +256,7 @@ class WorkoutTracker {
         // Request OAuth2 token with proper scopes
         const clientId = await this.getClientId();
         if (!clientId) {
-            alert('Google OAuth Client ID not configured. Please check your settings.');
+            alert('Google OAuth Client ID not configured.\n\nPlease check your Vercel project settings:\n1. Go to Vercel Dashboard > Your Project > Settings > Environment Variables\n2. Make sure GOOGLE_CLIENT_ID and GOOGLE_API_KEY are set\n3. Redeploy the application after setting the variables');
             return;
         }
 
@@ -334,7 +346,7 @@ class WorkoutTracker {
             // Request OAuth2 token with proper scopes
             this.getClientId().then(clientId => {
                 if (!clientId) {
-                    alert('Google OAuth Client ID not configured. Please check your settings.');
+                    alert('Google OAuth Client ID not configured.\n\nPlease check your Vercel project settings:\n1. Go to Vercel Dashboard > Your Project > Settings > Environment Variables\n2. Make sure GOOGLE_CLIENT_ID and GOOGLE_API_KEY are set\n3. Redeploy the application after setting the variables');
                     resolve(false);
                     return;
                 }
