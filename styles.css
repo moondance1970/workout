@@ -772,3 +772,35 @@ textarea:focus {
     }
 }
 
+/* Footer Styles */
+footer {
+    text-align: center;
+    padding: 20px;
+    color: #666;
+    font-size: 12px;
+    border-top: 1px solid #e0e0e0;
+    margin-top: 20px;
+    background: #f8f9fa;
+}
+
+footer a {
+    color: #667eea;
+    text-decoration: none;
+    margin: 0 10px;
+    transition: color 0.3s;
+}
+
+footer a:hover {
+    color: #764ba2;
+    text-decoration: underline;
+}
+
+footer p {
+    margin: 8px 0;
+}
+
+footer p:last-child {
+    color: #999;
+    margin-top: 10px;
+}
+
