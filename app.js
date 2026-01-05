@@ -262,7 +262,7 @@ class WorkoutTracker {
 
         this.tokenRequestInProgress = true;
 
-        const scopes = 'https://www.googleapis.com/auth/spreadsheets https://www.googleapis.com/auth/drive.readonly https://www.googleapis.com/auth/userinfo.email https://www.googleapis.com/auth/userinfo.profile';
+        const scopes = 'https://www.googleapis.com/auth/spreadsheets https://www.googleapis.com/auth/drive.file https://www.googleapis.com/auth/userinfo.email https://www.googleapis.com/auth/userinfo.profile';
         
         // Use Google Identity Services token client
         const tokenClient = google.accounts.oauth2.initTokenClient({
@@ -353,7 +353,7 @@ class WorkoutTracker {
 
                 this.tokenRequestInProgress = true;
 
-                const scopes = 'https://www.googleapis.com/auth/spreadsheets https://www.googleapis.com/auth/drive.readonly https://www.googleapis.com/auth/userinfo.email https://www.googleapis.com/auth/userinfo.profile';
+                const scopes = 'https://www.googleapis.com/auth/spreadsheets https://www.googleapis.com/auth/drive.file https://www.googleapis.com/auth/userinfo.email https://www.googleapis.com/auth/userinfo.profile';
                 
                 // Use Google Identity Services token client
                 const tokenClient = google.accounts.oauth2.initTokenClient({
@@ -475,7 +475,8 @@ class WorkoutTracker {
                     // No sheet found - automatically create a new sheet
                     console.log(`No '${defaultSheetName}' sheet found. Creating new sheet automatically...`);
                     try {
-                        userSheetId = await this.createNewSheet(defaultSheetName);
+                        // Pass makeUnique=true since we can't search for existing sheets without Drive API
+                        userSheetId = await this.createNewSheet(defaultSheetName, true);
                         if (userSheetId) {
                             this.saveSheetIdForUser(userEmail, userSheetId);
                             localStorage.setItem('sheetId', userSheetId);
@@ -524,7 +525,8 @@ class WorkoutTracker {
                 console.log('Drive search failed, attempting to create new sheet as fallback...');
                 try {
                     const defaultSheetName = 'Workout Tracker';
-                    userSheetId = await this.createNewSheet(defaultSheetName);
+                    // Pass makeUnique=true since we can't search for existing sheets without Drive API
+                    userSheetId = await this.createNewSheet(defaultSheetName, true);
                     if (userSheetId) {
                         console.log('Successfully created new sheet as fallback:', userSheetId);
                         this.saveSheetIdForUser(userEmail, userSheetId);
@@ -564,7 +566,7 @@ class WorkoutTracker {
         }
     }
 
-    async createNewSheet(sheetName = 'Workout Tracker') {
+    async createNewSheet(sheetName = 'Workout Tracker', makeUnique = false) {
         try {
             await this.initGoogleSheets();
             
@@ -576,10 +578,17 @@ class WorkoutTracker {
                 throw new Error('gapi.client not available');
             }
             
+            // If makeUnique is true and we can't search for existing sheets, add timestamp to avoid duplicates
+            let finalSheetName = sheetName;
+            if (makeUnique) {
+                const timestamp = new Date().toISOString().split('T')[0]; // YYYY-MM-DD format
+                finalSheetName = `${sheetName} (${timestamp})`;
+            }
+            
             // Create a new spreadsheet with the provided name
             const response = await gapi.client.sheets.spreadsheets.create({
                 properties: {
-                    title: sheetName
+                    title: finalSheetName
                 },
                 sheets: [
                     {
@@ -3872,6 +3881,8 @@ class WorkoutTracker {
     }
 
     async findSheetByName(sheetName) {
+        // Using drive.file scope (non-sensitive, no CASA required)
+        // Can only find sheets the app created or user selected via Picker API
         if (!this.isSignedIn || !this.googleToken) {
             console.warn('Cannot search for sheet: not signed in');
             return [];
@@ -3887,7 +3898,7 @@ class WorkoutTracker {
             
             // Ensure token is set
             gapi.client.setToken({ access_token: this.googleToken });
-            console.log('Token set for Drive API search');
+            console.log('Token set for Drive API search (using drive.file scope)');
             
             // Verify Drive API is loaded
             if (!gapi.client.drive) {
@@ -3905,7 +3916,7 @@ class WorkoutTracker {
             // Escape single quotes in sheet name for the query
             const escapedName = sheetName.replace(/'/g, "\\'");
             
-            console.log('Searching for sheet with name:', sheetName);
+            console.log('Searching for sheet with name:', sheetName, '(drive.file scope - only finds app-created or user-selected files)');
             const response = await gapi.client.drive.files.list({
                 q: `name='${escapedName}' and mimeType='application/vnd.google-apps.spreadsheet' and trashed=false`,
                 fields: 'files(id, name, modifiedTime)',
@@ -3913,7 +3924,7 @@ class WorkoutTracker {
             });
             
             const files = response.result.files || [];
-            console.log(`Found ${files.length} sheet(s) with name "${sheetName}"`);
+            console.log(`Found ${files.length} sheet(s) with name "${sheetName}" (within drive.file scope)`);
             files.forEach((file, idx) => {
                 console.log(`  ${idx + 1}. "${file.name}" (ID: ${file.id}, Modified: ${file.modifiedTime})`);
             });
@@ -3927,7 +3938,7 @@ class WorkoutTracker {
             return sheets;
         } catch (error) {
             console.error('Error searching for sheet by name:', error);
-            throw error;
+            return [];
         }
     }
 
