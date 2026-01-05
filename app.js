@@ -31,6 +31,7 @@ class WorkoutTracker {
         this.workoutPlans = []; // Array of workout plans: {id, name, exerciseSlots: [{slotNumber, exerciseName}], createdAt, createdBy, creatorSheetId}
         this.currentPlanIndex = -1; // Index of current active plan (-1 means no plan active)
         this.activePlanId = null; // ID of currently active plan
+        this.duplicateSheetsToDelete = []; // Store duplicate sheets that can be deleted after user confirms
         this.init();
     }
 
@@ -3968,38 +3969,28 @@ class WorkoutTracker {
             this.saveSheetIdForUser(userEmail, selectedSheet.id);
             localStorage.setItem('sheetId', selectedSheet.id);
             
-            // Delete the other duplicate sheets
+            // Store the other duplicate sheets for potential deletion (user will decide)
             const otherSheets = sheets.filter((_, index) => index !== selectedIndex);
-            if (otherSheets.length > 0) {
-                console.log(`Deleting ${otherSheets.length} duplicate sheet(s)...`);
-                try {
-                    await this.initGoogleDrive();
-                    if (gapi.client && gapi.client.drive) {
-                        gapi.client.setToken({ access_token: this.googleToken });
-                        
-                        // Delete each duplicate sheet
-                        for (const sheet of otherSheets) {
-                            try {
-                                await gapi.client.drive.files.delete({
-                                    fileId: sheet.id
-                                });
-                                console.log(`Deleted duplicate sheet: ${sheet.name} (${sheet.id})`);
-                            } catch (deleteError) {
-                                console.warn(`Failed to delete sheet ${sheet.id}:`, deleteError);
-                                // Continue deleting others even if one fails
-                            }
-                        }
-                        console.log('Finished cleaning up duplicate sheets');
-                    }
-                } catch (error) {
-                    console.error('Error deleting duplicate sheets:', error);
-                    // Don't block the connection process if deletion fails
-                }
-            }
+            this.duplicateSheetsToDelete = otherSheets;
             
             const sheetStatus = document.getElementById('sheet-status');
             if (sheetStatus) {
-                sheetStatus.innerHTML = `<p style="color: green;">✓ Connected to '${selectedSheet.name}'${otherSheets.length > 0 ? ` (${otherSheets.length} duplicate sheet(s) removed)` : ''}</p>`;
+                let statusHTML = `<p style="color: green;">✓ Connected to '${selectedSheet.name}'</p>`;
+                
+                // Show delete button if there are duplicate sheets
+                if (otherSheets.length > 0) {
+                    statusHTML += `<button id="delete-duplicate-sheets-btn" class="btn-secondary" style="margin-top: 10px; padding: 8px 16px; font-size: 14px;">🗑️ Delete ${otherSheets.length} Other Duplicate Sheet(s)</button>`;
+                }
+                
+                sheetStatus.innerHTML = statusHTML;
+                
+                // Add click handler for delete button
+                if (otherSheets.length > 0) {
+                    const deleteBtn = document.getElementById('delete-duplicate-sheets-btn');
+                    if (deleteBtn) {
+                        deleteBtn.onclick = () => this.deleteDuplicateSheets();
+                    }
+                }
             }
             
             // Continue with connection process
@@ -4014,6 +4005,73 @@ class WorkoutTracker {
             const sheetStatus = document.getElementById('sheet-status');
             if (sheetStatus) {
                 sheetStatus.innerHTML = '<p style="color: orange;">⚠ No sheet selected. Please try again.</p>';
+            }
+        }
+    }
+
+    async deleteDuplicateSheets() {
+        if (!this.duplicateSheetsToDelete || this.duplicateSheetsToDelete.length === 0) {
+            return;
+        }
+        
+        // Confirm with user
+        const confirmMessage = `Are you sure you want to delete ${this.duplicateSheetsToDelete.length} duplicate sheet(s)?\n\nThis action cannot be undone.`;
+        if (!confirm(confirmMessage)) {
+            return;
+        }
+        
+        const sheetStatus = document.getElementById('sheet-status');
+        if (sheetStatus) {
+            sheetStatus.innerHTML = '<p style="color: orange;">⏳ Deleting duplicate sheets...</p>';
+        }
+        
+        try {
+            await this.initGoogleDrive();
+            if (gapi.client && gapi.client.drive) {
+                gapi.client.setToken({ access_token: this.googleToken });
+                
+                let deletedCount = 0;
+                let failedCount = 0;
+                
+                // Delete each duplicate sheet
+                for (const sheet of this.duplicateSheetsToDelete) {
+                    try {
+                        await gapi.client.drive.files.delete({
+                            fileId: sheet.id
+                        });
+                        console.log(`Deleted duplicate sheet: ${sheet.name} (${sheet.id})`);
+                        deletedCount++;
+                    } catch (deleteError) {
+                        console.warn(`Failed to delete sheet ${sheet.id}:`, deleteError);
+                        failedCount++;
+                    }
+                }
+                
+                console.log(`Finished deleting duplicate sheets: ${deletedCount} deleted, ${failedCount} failed`);
+                
+                // Update status message
+                if (sheetStatus) {
+                    if (failedCount === 0) {
+                        sheetStatus.innerHTML = `<p style="color: green;">✓ Successfully deleted ${deletedCount} duplicate sheet(s)</p>`;
+                    } else {
+                        sheetStatus.innerHTML = `<p style="color: orange;">⚠ Deleted ${deletedCount} sheet(s), ${failedCount} failed</p>`;
+                    }
+                    
+                    // Clear the message after 3 seconds
+                    setTimeout(() => {
+                        if (sheetStatus) {
+                            sheetStatus.innerHTML = '<p style="color: green;">✓ Connected to your sheet</p>';
+                        }
+                    }, 3000);
+                }
+                
+                // Clear the duplicate sheets list
+                this.duplicateSheetsToDelete = [];
+            }
+        } catch (error) {
+            console.error('Error deleting duplicate sheets:', error);
+            if (sheetStatus) {
+                sheetStatus.innerHTML = '<p style="color: red;">❌ Error deleting duplicate sheets. Please try again.</p>';
             }
         }
     }
