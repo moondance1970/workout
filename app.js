@@ -3968,9 +3968,38 @@ class WorkoutTracker {
             this.saveSheetIdForUser(userEmail, selectedSheet.id);
             localStorage.setItem('sheetId', selectedSheet.id);
             
+            // Delete the other duplicate sheets
+            const otherSheets = sheets.filter((_, index) => index !== selectedIndex);
+            if (otherSheets.length > 0) {
+                console.log(`Deleting ${otherSheets.length} duplicate sheet(s)...`);
+                try {
+                    await this.initGoogleDrive();
+                    if (gapi.client && gapi.client.drive) {
+                        gapi.client.setToken({ access_token: this.googleToken });
+                        
+                        // Delete each duplicate sheet
+                        for (const sheet of otherSheets) {
+                            try {
+                                await gapi.client.drive.files.delete({
+                                    fileId: sheet.id
+                                });
+                                console.log(`Deleted duplicate sheet: ${sheet.name} (${sheet.id})`);
+                            } catch (deleteError) {
+                                console.warn(`Failed to delete sheet ${sheet.id}:`, deleteError);
+                                // Continue deleting others even if one fails
+                            }
+                        }
+                        console.log('Finished cleaning up duplicate sheets');
+                    }
+                } catch (error) {
+                    console.error('Error deleting duplicate sheets:', error);
+                    // Don't block the connection process if deletion fails
+                }
+            }
+            
             const sheetStatus = document.getElementById('sheet-status');
             if (sheetStatus) {
-                sheetStatus.innerHTML = `<p style="color: green;">✓ Connected to '${selectedSheet.name}'</p>`;
+                sheetStatus.innerHTML = `<p style="color: green;">✓ Connected to '${selectedSheet.name}'${otherSheets.length > 0 ? ` (${otherSheets.length} duplicate sheet(s) removed)` : ''}</p>`;
             }
             
             // Continue with connection process
