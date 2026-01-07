@@ -798,17 +798,53 @@ class WorkoutTracker {
         }
     }
 
-    async createBothSheets() {
+    async createBothSheets(forceNew = false) {
         try {
             // Create static sheet with exact name (no date)
             const staticSheetName = 'Workout Tracker - Config';
-            const staticSheetId = await this.createNewSheet(staticSheetName, false, 'static');
-            console.log('Created static sheet:', staticSheetId);
+            let staticSheetId;
+            if (forceNew) {
+                // During migration, force creation of new sheets
+                staticSheetId = await this.createNewSheet(staticSheetName, false, 'static');
+            } else {
+                // Normal flow: check for existing sheets first
+                const existingStatic = await this.findSheetByName(staticSheetName);
+                const validStatic = existingStatic.filter(s => 
+                    s.name === staticSheetName && 
+                    !s.name.includes('OLD') && 
+                    !s.name.includes('Migrated')
+                );
+                if (validStatic.length > 0) {
+                    staticSheetId = validStatic[0].id;
+                    console.log('Reusing existing static sheet:', staticSheetId);
+                } else {
+                    staticSheetId = await this.createNewSheet(staticSheetName, false, 'static');
+                    console.log('Created new static sheet:', staticSheetId);
+                }
+            }
             
             // Create sessions sheet with exact name (no date)
             const sessionsSheetName = 'Workout Tracker - Sessions';
-            const sessionsSheetId = await this.createNewSheet(sessionsSheetName, false, 'sessions');
-            console.log('Created sessions sheet:', sessionsSheetId);
+            let sessionsSheetId;
+            if (forceNew) {
+                // During migration, force creation of new sheets
+                sessionsSheetId = await this.createNewSheet(sessionsSheetName, false, 'sessions');
+            } else {
+                // Normal flow: check for existing sheets first
+                const existingSessions = await this.findSheetByName(sessionsSheetName);
+                const validSessions = existingSessions.filter(s => 
+                    s.name === sessionsSheetName && 
+                    !s.name.includes('OLD') && 
+                    !s.name.includes('Migrated')
+                );
+                if (validSessions.length > 0) {
+                    sessionsSheetId = validSessions[0].id;
+                    console.log('Reusing existing sessions sheet:', sessionsSheetId);
+                } else {
+                    sessionsSheetId = await this.createNewSheet(sessionsSheetName, false, 'sessions');
+                    console.log('Created new sessions sheet:', sessionsSheetId);
+                }
+            }
             
             // Save both sheet IDs
             if (this.userEmail) {
@@ -847,9 +883,9 @@ class WorkoutTracker {
             
             console.log('Old sheet tabs:', oldSheetNames);
             
-            // Create new sheets
-            const { staticSheetId, sessionsSheetId } = await this.createBothSheets();
-            console.log('Created new sheets - Static:', staticSheetId, 'Sessions:', sessionsSheetId);
+            // Create new sheets (force creation during migration)
+            const { staticSheetId, sessionsSheetId } = await this.createBothSheets(true);
+            console.log('Created new sheets for migration - Static:', staticSheetId, 'Sessions:', sessionsSheetId);
             
             // Copy Plans tab if it exists
             if (oldSheetNames.includes('Plans')) {
@@ -877,20 +913,25 @@ class WorkoutTracker {
                 try {
                     const exercisesData = await gapi.client.sheets.spreadsheets.values.get({
                         spreadsheetId: oldSheetId,
-                        range: 'Exercises!A2:D1000'
+                        range: 'Exercises!A1:D1000' // Include header row
                     });
                     if (exercisesData.result.values && exercisesData.result.values.length > 0) {
+                        // Copy all rows including header
                         await gapi.client.sheets.spreadsheets.values.update({
                             spreadsheetId: staticSheetId,
-                            range: 'Exercises!A2',
+                            range: 'Exercises!A1',
                             valueInputOption: 'RAW',
                             resource: { values: exercisesData.result.values }
                         });
-                        console.log('Copied Exercises tab');
+                        console.log('Copied Exercises tab:', exercisesData.result.values.length, 'rows');
+                    } else {
+                        console.log('Exercises tab exists but is empty');
                     }
                 } catch (e) {
                     console.warn('Error copying Exercises tab:', e);
                 }
+            } else {
+                console.log('Exercises tab not found in old sheet');
             }
             
             // Copy Config tab if it exists
@@ -919,20 +960,25 @@ class WorkoutTracker {
                 try {
                     const sessionsData = await gapi.client.sheets.spreadsheets.values.get({
                         spreadsheetId: oldSheetId,
-                        range: 'Sheet1!A2:G10000'
+                        range: 'Sheet1!A1:G10000' // Include header row
                     });
                     if (sessionsData.result.values && sessionsData.result.values.length > 0) {
+                        // Copy all rows including header
                         await gapi.client.sheets.spreadsheets.values.update({
                             spreadsheetId: sessionsSheetId,
-                            range: 'Sheet1!A2',
+                            range: 'Sheet1!A1',
                             valueInputOption: 'RAW',
                             resource: { values: sessionsData.result.values }
                         });
-                        console.log('Copied Sheet1 (sessions)');
+                        console.log('Copied Sheet1 (sessions):', sessionsData.result.values.length, 'rows');
+                    } else {
+                        console.log('Sheet1 exists but is empty');
                     }
                 } catch (e) {
                     console.warn('Error copying Sheet1:', e);
                 }
+            } else {
+                console.log('Sheet1 not found in old sheet');
             }
             
             // Optionally rename old sheet to archive it
