@@ -3184,7 +3184,10 @@ class WorkoutTracker {
             html += `<div class="session-card">`;
             html += `<div class="date" style="display: flex; justify-content: space-between; align-items: center;">`;
             html += `<span>${dateStr}</span>`;
+            html += `<div style="display: flex; gap: 5px;">`;
             html += `<button class="copy-session-btn" data-session-date="${session.date}" style="padding: 5px 10px; font-size: 12px; background: #667eea; color: white; border: none; border-radius: 5px; cursor: pointer;">📋 Copy</button>`;
+            html += `<button class="delete-session-btn" data-session-date="${session.date}" style="padding: 5px 10px; font-size: 12px; background: #f44336; color: white; border: none; border-radius: 5px; cursor: pointer;">🗑️ Delete</button>`;
+            html += `</div>`;
             html += `</div>`;
             
             if (session.exercises && session.exercises.length > 0) {
@@ -3280,6 +3283,53 @@ class WorkoutTracker {
                 }
             });
         });
+        
+        // Add event listeners for delete buttons
+        container.querySelectorAll('.delete-session-btn').forEach(btn => {
+            btn.addEventListener('click', async (e) => {
+                const sessionDate = btn.getAttribute('data-session-date');
+                const session = sessionsForCopy.find(s => s.date === sessionDate);
+                if (session) {
+                    await this.deleteSession(sessionDate);
+                }
+            });
+        });
+    }
+
+    async deleteSession(sessionDate) {
+        if (!confirm(`Are you sure you want to delete the workout session from ${new Date(sessionDate).toLocaleDateString()}?`)) {
+            return;
+        }
+        
+        try {
+            // Remove session from array
+            const sessionIndex = this.sessions.findIndex(s => s.date === sessionDate);
+            if (sessionIndex !== -1) {
+                this.sessions.splice(sessionIndex, 1);
+                
+                // Update current session if it was deleted
+                if (this.currentSession && this.currentSession.date === sessionDate) {
+                    this.currentSession = this.getTodaySession();
+                }
+                
+                // Save to localStorage
+                this.saveSessions();
+                
+                // Immediately sync to Google Sheets
+                if (this.isSignedIn && this.sheetId) {
+                    await this.syncToSheet(true); // Silent sync
+                }
+                
+                // Re-render history and today's workout
+                this.renderHistory();
+                this.renderTodayWorkout();
+                
+                console.log('Session deleted and synced to sheet');
+            }
+        } catch (error) {
+            console.error('Error deleting session:', error);
+            alert('Error deleting session: ' + (error.message || 'Unknown error') + '\n\nSession removed locally but may not be deleted from Google Sheets. Please try syncing again.');
+        }
     }
 
     copySessionToClipboard(session) {
