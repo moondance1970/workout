@@ -476,9 +476,9 @@ class WorkoutTracker {
                     const sheetName = sheetInfo.result?.properties?.title || '';
                     
                     // If sheet name contains "Config" or "Sessions", it's already a new format sheet
-                    // Don't migrate, just clear old reference and try to find the matching sheets
+                    // But check if the new sheets actually have data - if not, we might need to migrate
                     if (sheetName.includes('Config') || sheetName.includes('Sessions')) {
-                        console.log('Sheet appears to be already migrated, clearing old reference and searching for matching sheets');
+                        console.log('Old sheet ID points to a Config/Sessions sheet, clearing invalid reference');
                         // Clear old reference
                         if (userData && typeof userData === 'string') {
                             delete userSheetIds[userEmail];
@@ -517,8 +517,42 @@ class WorkoutTracker {
                         localStorage.removeItem('sheetId');
                     }
                 } catch (error) {
-                    console.error('Migration check failed:', error);
-                    // If we can't verify, don't attempt migration - just continue
+                    // Sheet doesn't exist (404) or is inaccessible
+                    console.warn('Old sheet ID is invalid or inaccessible (404/403):', error);
+                    // Clear the invalid old sheet ID
+                    if (userData && typeof userData === 'string') {
+                        delete userSheetIds[userEmail];
+                        localStorage.setItem('userSheetIds', JSON.stringify(userSheetIds));
+                    }
+                    localStorage.removeItem('sheetId');
+                    
+                    // Try to find the actual old sheet by searching for "Workout Tracker" (without Config/Sessions)
+                    try {
+                        const oldSheets = await this.findSheetByName('Workout Tracker');
+                        const actualOldSheet = oldSheets.find(s => 
+                            s.name === 'Workout Tracker' && 
+                            !s.name.includes('Config') && 
+                            !s.name.includes('Sessions') &&
+                            !s.name.includes('OLD') &&
+                            !s.name.includes('Migrated')
+                        );
+                        
+                        if (actualOldSheet && (!staticSheetId || !sessionsSheetId)) {
+                            console.log('Found actual old sheet, starting migration:', actualOldSheet.id);
+                            // Perform migration with the actual old sheet
+                            const { staticSheetId: newStaticId, sessionsSheetId: newSessionsId } = await this.migrateToTwoSheets(actualOldSheet.id);
+                            staticSheetId = newStaticId;
+                            sessionsSheetId = newSessionsId;
+                            this.staticSheetId = staticSheetId;
+                            this.sessionsSheetId = sessionsSheetId;
+                            
+                            // Complete connection with new sheets
+                            await this.completeSheetConnection(sessionsSheetId);
+                            return;
+                        }
+                    } catch (searchError) {
+                        console.warn('Error searching for old sheet:', searchError);
+                    }
                 }
             }
         }
