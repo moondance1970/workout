@@ -632,61 +632,8 @@ class WorkoutTracker {
                         this.sessionsSheetId = sessionsSheetId;
                     }
                     
-                    // After creating new sheets, check if we need to migrate from old sheet
-                    // Try to find the old "Workout Tracker" sheet
-                    try {
-                        await this.initGoogleSheets();
-                        if (gapi.client) {
-                            gapi.client.setToken({ access_token: this.googleToken });
-                        }
-                        
-                        const oldSheets = await this.findSheetByName('Workout Tracker');
-                        const actualOldSheet = oldSheets.find(s => 
-                            s.name === 'Workout Tracker' && 
-                            !s.name.includes('Config') && 
-                            !s.name.includes('Sessions') &&
-                            !s.name.includes('OLD') &&
-                            !s.name.includes('Migrated')
-                        );
-                        
-                        if (actualOldSheet) {
-                            console.log('Found old sheet to migrate:', actualOldSheet.id);
-                            // Check if new sheets are empty - if so, migrate
-                            try {
-                                const sessionsCheck = await gapi.client.sheets.spreadsheets.values.get({
-                                    spreadsheetId: sessionsSheetId,
-                                    range: 'Sheet1!A2:G10'
-                                });
-                                const hasData = sessionsCheck.result.values && sessionsCheck.result.values.length > 0;
-                                
-                                if (!hasData) {
-                                    console.log('New sheets are empty, migrating from old sheet...');
-                                    // Perform migration
-                                    const { staticSheetId: migratedStaticId, sessionsSheetId: migratedSessionsId } = await this.migrateToTwoSheets(actualOldSheet.id);
-                                    staticSheetId = migratedStaticId;
-                                    sessionsSheetId = migratedSessionsId;
-                                    this.staticSheetId = staticSheetId;
-                                    this.sessionsSheetId = sessionsSheetId;
-                                    
-                                    const sheetStatus = document.getElementById('sheet-status');
-                                    if (sheetStatus) {
-                                        sheetStatus.innerHTML = '<p style="color: green;">✓ Migrated data from old sheet to new sheets</p>';
-                                    }
-                                } else {
-                                    console.log('New sheets already have data, skipping migration');
-                                }
-                            } catch (checkError) {
-                                console.warn('Error checking if sheets are empty:', checkError);
-                            }
-                        } else {
-                            console.log('No old sheet found to migrate from');
-                        }
-                    } catch (migrationError) {
-                        console.warn('Could not find or migrate from old sheet:', migrationError);
-                    }
-                    
                     const sheetStatus = document.getElementById('sheet-status');
-                    if (sheetStatus && !sheetStatus.innerHTML.includes('Migrated')) {
+                    if (sheetStatus) {
                         sheetStatus.innerHTML = '<p style="color: green;">✓ Created and connected to your sheets</p>';
                     }
                 }
@@ -711,13 +658,82 @@ class WorkoutTracker {
             }
         }
         
+        // After connecting, check if sheets are empty and need migration
+        if (staticSheetId && sessionsSheetId) {
+            try {
+                await this.initGoogleSheets();
+                if (gapi.client) {
+                    gapi.client.setToken({ access_token: this.googleToken });
+                }
+                
+                // Check if sessions sheet is empty
+                const sessionsCheck = await gapi.client.sheets.spreadsheets.values.get({
+                    spreadsheetId: sessionsSheetId,
+                    range: 'Sheet1!A2:G10'
+                });
+                const hasSessionsData = sessionsCheck.result.values && sessionsCheck.result.values.length > 0;
+                
+                // Check if static sheet is empty
+                const exercisesCheck = await gapi.client.sheets.spreadsheets.values.get({
+                    spreadsheetId: staticSheetId,
+                    range: 'Exercises!A2:D10'
+                });
+                const hasExercisesData = exercisesCheck.result.values && exercisesCheck.result.values.length > 0;
+                
+                // If both sheets are empty, try to find and migrate from old sheet
+                if (!hasSessionsData && !hasExercisesData) {
+                    console.log('Both sheets are empty, searching for old sheet to migrate...');
+                    try {
+                        const oldSheets = await this.findSheetByName('Workout Tracker');
+                        const actualOldSheet = oldSheets.find(s => 
+                            s.name === 'Workout Tracker' && 
+                            !s.name.includes('Config') && 
+                            !s.name.includes('Sessions') &&
+                            !s.name.includes('OLD') &&
+                            !s.name.includes('Migrated')
+                        );
+                        
+                        if (actualOldSheet) {
+                            console.log('Found old sheet to migrate:', actualOldSheet.id);
+                            // Perform migration
+                            const { staticSheetId: migratedStaticId, sessionsSheetId: migratedSessionsId } = await this.migrateToTwoSheets(actualOldSheet.id);
+                            this.staticSheetId = migratedStaticId;
+                            this.sessionsSheetId = migratedSessionsId;
+                            
+                            // Reload data after migration
+                            this.sessions = await this.loadSessions();
+                            this.exerciseList = await this.loadExerciseList();
+                            this.workoutPlans = await this.loadWorkoutPlans();
+                            this.updateExerciseList();
+                            this.renderTodayWorkout();
+                            this.renderHistory();
+                            
+                            const sheetStatus = document.getElementById('sheet-status');
+                            if (sheetStatus) {
+                                sheetStatus.innerHTML = '<p style="color: green;">✓ Migrated data from old sheet to new sheets</p>';
+                            }
+                            return; // Skip normal connection flow since we migrated
+                        } else {
+                            console.log('No old sheet found to migrate from');
+                        }
+                    } catch (migrationError) {
+                        console.warn('Error during migration check:', migrationError);
+                    }
+                } else {
+                    console.log('Sheets have data, no migration needed');
+                }
+            } catch (checkError) {
+                console.warn('Error checking if sheets need migration:', checkError);
+            }
+        }
+        
         // Complete connection with sessions sheet (for backward compatibility)
         if (sessionsSheetId) {
             await this.completeSheetConnection(sessionsSheetId);
             
             // Update status if not already set
             const sheetStatus = document.getElementById('sheet-status');
-            if (sheetStatus && !sheetStatus.innerHTML.includes('Connected') && !sheetStatus.innerHTML.includes('Created')) {
+            if (sheetStatus && !sheetStatus.innerHTML.includes('Connected') && !sheetStatus.innerHTML.includes('Created') && !sheetStatus.innerHTML.includes('Migrated')) {
                 sheetStatus.innerHTML = '<p style="color: green;">✓ Connected to your sheets</p>';
             }
         }
