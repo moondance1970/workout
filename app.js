@@ -440,39 +440,86 @@ class WorkoutTracker {
         let staticSheetId = this.getStaticSheetIdForUser(userEmail);
         let sessionsSheetId = this.getSessionsSheetIdForUser(userEmail);
         
-        // Check if we need to migrate (old sheetId exists but new ones don't)
-        const oldSheetId = this.getSheetIdForUser(userEmail);
-        if (oldSheetId && (!staticSheetId || !sessionsSheetId)) {
-            // Need to migrate
-            console.log('Old sheet format detected, starting migration...');
-            try {
-                await this.initGoogleSheets();
-                if (gapi.client) {
-                    gapi.client.setToken({ access_token: this.googleToken });
+        // If both new sheet IDs exist, migration is already complete - skip migration check
+        if (staticSheetId && sessionsSheetId) {
+            console.log('Both sheet IDs found, migration already completed');
+        } else {
+            // Check if we need to migrate (old sheetId exists but new ones don't)
+            const userSheetIds = JSON.parse(localStorage.getItem('userSheetIds') || '{}');
+            const userData = userSheetIds[userEmail];
+            let oldSheetId = null;
+            
+            // Only consider it an old sheet ID if it's stored as a string (old format)
+            // and not as part of the new object format
+            if (userData && typeof userData === 'string') {
+                oldSheetId = userData;
+            } else {
+                // Also check the general localStorage for backward compatibility
+                const generalSheetId = localStorage.getItem('sheetId');
+                if (generalSheetId) {
+                    oldSheetId = generalSheetId;
                 }
-                
-                // Validate old sheet is accessible
-                await gapi.client.sheets.spreadsheets.get({
-                    spreadsheetId: oldSheetId
-                });
-                
-                // Perform migration
-                const { staticSheetId: newStaticId, sessionsSheetId: newSessionsId } = await this.migrateToTwoSheets(oldSheetId);
-                staticSheetId = newStaticId;
-                sessionsSheetId = newSessionsId;
-                this.staticSheetId = staticSheetId;
-                this.sessionsSheetId = sessionsSheetId;
-                
-                // Clear old sheetId
-                this.saveSheetIdForUser(userEmail, null);
-                localStorage.removeItem('sheetId');
-                
-                // Complete connection with new sheets
-                await this.completeSheetConnection(sessionsSheetId);
-                return;
-            } catch (error) {
-                console.error('Migration failed:', error);
-                // Continue to try finding/creating sheets
+            }
+            
+            if (oldSheetId && (!staticSheetId || !sessionsSheetId)) {
+                // Verify this is actually an old sheet (not already migrated)
+                // Check if the sheet name contains "Config" or "Sessions" - if so, it's already migrated
+                try {
+                    await this.initGoogleSheets();
+                    if (gapi.client) {
+                        gapi.client.setToken({ access_token: this.googleToken });
+                    }
+                    
+                    const sheetInfo = await gapi.client.sheets.spreadsheets.get({
+                        spreadsheetId: oldSheetId
+                    });
+                    const sheetName = sheetInfo.result?.properties?.title || '';
+                    
+                    // If sheet name contains "Config" or "Sessions", it's already a new format sheet
+                    // Don't migrate, just clear old reference and try to find the matching sheets
+                    if (sheetName.includes('Config') || sheetName.includes('Sessions')) {
+                        console.log('Sheet appears to be already migrated, clearing old reference and searching for matching sheets');
+                        // Clear old reference
+                        if (userData && typeof userData === 'string') {
+                            delete userSheetIds[userEmail];
+                            localStorage.setItem('userSheetIds', JSON.stringify(userSheetIds));
+                        }
+                        localStorage.removeItem('sheetId');
+                        // Don't return - continue to search for both sheets below
+                    } else if (!sheetName.includes('OLD') && !sheetName.includes('Migrated')) {
+                        // This is an old sheet (not already migrated), perform migration
+                        console.log('Old sheet format detected, starting migration...');
+                        
+                        // Perform migration
+                        const { staticSheetId: newStaticId, sessionsSheetId: newSessionsId } = await this.migrateToTwoSheets(oldSheetId);
+                        staticSheetId = newStaticId;
+                        sessionsSheetId = newSessionsId;
+                        this.staticSheetId = staticSheetId;
+                        this.sessionsSheetId = sessionsSheetId;
+                        
+                        // Clear old sheetId completely from all storage locations
+                        if (userData && typeof userData === 'string') {
+                            delete userSheetIds[userEmail];
+                            localStorage.setItem('userSheetIds', JSON.stringify(userSheetIds));
+                        }
+                        localStorage.removeItem('sheetId');
+                        
+                        // Complete connection with new sheets
+                        await this.completeSheetConnection(sessionsSheetId);
+                        return;
+                    } else {
+                        // Sheet is marked as OLD/Migrated, clear reference and continue
+                        console.log('Old migrated sheet found, clearing reference');
+                        if (userData && typeof userData === 'string') {
+                            delete userSheetIds[userEmail];
+                            localStorage.setItem('userSheetIds', JSON.stringify(userSheetIds));
+                        }
+                        localStorage.removeItem('sheetId');
+                    }
+                } catch (error) {
+                    console.error('Migration check failed:', error);
+                    // If we can't verify, don't attempt migration - just continue
+                }
             }
         }
         
