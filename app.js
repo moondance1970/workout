@@ -671,11 +671,26 @@ class WorkoutTracker {
                 throw new Error('gapi.client not available');
             }
             
-            // If makeUnique is true and we can't search for existing sheets, add timestamp to avoid duplicates
+            // If makeUnique is true, check for existing sheets first to avoid duplicates
             let finalSheetName = sheetName;
             if (makeUnique) {
-                const timestamp = new Date().toISOString().split('T')[0]; // YYYY-MM-DD format
-                finalSheetName = `${sheetName} (${timestamp})`;
+                // Try to find existing sheet with this name first
+                try {
+                    const existingSheets = await this.findSheetByName(sheetName);
+                    const validSheets = existingSheets.filter(sheet => 
+                        sheet.name === sheetName && 
+                        !sheet.name.includes('OLD') && 
+                        !sheet.name.includes('Migrated')
+                    );
+                    if (validSheets.length > 0) {
+                        // Sheet already exists, return its ID instead of creating a new one
+                        console.log(`Sheet "${sheetName}" already exists, using existing sheet:`, validSheets[0].id);
+                        return validSheets[0].id;
+                    }
+                } catch (error) {
+                    console.warn('Error checking for existing sheet, proceeding with creation:', error);
+                }
+                // No existing sheet found, proceed with creation using exact name
             }
             
             let sheets = [];
