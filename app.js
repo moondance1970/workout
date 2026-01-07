@@ -785,15 +785,13 @@ class WorkoutTracker {
 
     async createBothSheets() {
         try {
-            const timestamp = new Date().toISOString().split('T')[0]; // YYYY-MM-DD format
-            
-            // Create static sheet
-            const staticSheetName = `Workout Tracker - Config (${timestamp})`;
+            // Create static sheet with exact name (no date)
+            const staticSheetName = 'Workout Tracker - Config';
             const staticSheetId = await this.createNewSheet(staticSheetName, false, 'static');
             console.log('Created static sheet:', staticSheetId);
             
-            // Create sessions sheet
-            const sessionsSheetName = `Workout Tracker - Sessions (${timestamp})`;
+            // Create sessions sheet with exact name (no date)
+            const sessionsSheetName = 'Workout Tracker - Sessions';
             const sessionsSheetId = await this.createNewSheet(sessionsSheetName, false, 'sessions');
             console.log('Created sessions sheet:', sessionsSheetId);
             
