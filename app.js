@@ -632,8 +632,61 @@ class WorkoutTracker {
                         this.sessionsSheetId = sessionsSheetId;
                     }
                     
+                    // After creating new sheets, check if we need to migrate from old sheet
+                    // Try to find the old "Workout Tracker" sheet
+                    try {
+                        await this.initGoogleSheets();
+                        if (gapi.client) {
+                            gapi.client.setToken({ access_token: this.googleToken });
+                        }
+                        
+                        const oldSheets = await this.findSheetByName('Workout Tracker');
+                        const actualOldSheet = oldSheets.find(s => 
+                            s.name === 'Workout Tracker' && 
+                            !s.name.includes('Config') && 
+                            !s.name.includes('Sessions') &&
+                            !s.name.includes('OLD') &&
+                            !s.name.includes('Migrated')
+                        );
+                        
+                        if (actualOldSheet) {
+                            console.log('Found old sheet to migrate:', actualOldSheet.id);
+                            // Check if new sheets are empty - if so, migrate
+                            try {
+                                const sessionsCheck = await gapi.client.sheets.spreadsheets.values.get({
+                                    spreadsheetId: sessionsSheetId,
+                                    range: 'Sheet1!A2:G10'
+                                });
+                                const hasData = sessionsCheck.result.values && sessionsCheck.result.values.length > 0;
+                                
+                                if (!hasData) {
+                                    console.log('New sheets are empty, migrating from old sheet...');
+                                    // Perform migration
+                                    const { staticSheetId: migratedStaticId, sessionsSheetId: migratedSessionsId } = await this.migrateToTwoSheets(actualOldSheet.id);
+                                    staticSheetId = migratedStaticId;
+                                    sessionsSheetId = migratedSessionsId;
+                                    this.staticSheetId = staticSheetId;
+                                    this.sessionsSheetId = sessionsSheetId;
+                                    
+                                    const sheetStatus = document.getElementById('sheet-status');
+                                    if (sheetStatus) {
+                                        sheetStatus.innerHTML = '<p style="color: green;">✓ Migrated data from old sheet to new sheets</p>';
+                                    }
+                                } else {
+                                    console.log('New sheets already have data, skipping migration');
+                                }
+                            } catch (checkError) {
+                                console.warn('Error checking if sheets are empty:', checkError);
+                            }
+                        } else {
+                            console.log('No old sheet found to migrate from');
+                        }
+                    } catch (migrationError) {
+                        console.warn('Could not find or migrate from old sheet:', migrationError);
+                    }
+                    
                     const sheetStatus = document.getElementById('sheet-status');
-                    if (sheetStatus) {
+                    if (sheetStatus && !sheetStatus.innerHTML.includes('Migrated')) {
                         sheetStatus.innerHTML = '<p style="color: green;">✓ Created and connected to your sheets</p>';
                     }
                 }
