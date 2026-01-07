@@ -527,32 +527,9 @@ class WorkoutTracker {
                     localStorage.removeItem('sheetId');
                     
                     // Try to find the actual old sheet by searching for "Workout Tracker" (without Config/Sessions)
-                    try {
-                        const oldSheets = await this.findSheetByName('Workout Tracker');
-                        const actualOldSheet = oldSheets.find(s => 
-                            s.name === 'Workout Tracker' && 
-                            !s.name.includes('Config') && 
-                            !s.name.includes('Sessions') &&
-                            !s.name.includes('OLD') &&
-                            !s.name.includes('Migrated')
-                        );
-                        
-                        if (actualOldSheet && (!staticSheetId || !sessionsSheetId)) {
-                            console.log('Found actual old sheet, starting migration:', actualOldSheet.id);
-                            // Perform migration with the actual old sheet
-                            const { staticSheetId: newStaticId, sessionsSheetId: newSessionsId } = await this.migrateToTwoSheets(actualOldSheet.id);
-                            staticSheetId = newStaticId;
-                            sessionsSheetId = newSessionsId;
-                            this.staticSheetId = staticSheetId;
-                            this.sessionsSheetId = sessionsSheetId;
-                            
-                            // Complete connection with new sheets
-                            await this.completeSheetConnection(sessionsSheetId);
-                            return;
-                        }
-                    } catch (searchError) {
-                        console.warn('Error searching for old sheet:', searchError);
-                    }
+                    // Note: findSheetByName uses drive.file scope which may not find old sheets
+                    // So we'll check if new sheets are empty and prompt for migration
+                    console.log('Old sheet ID invalid, will check if migration needed after sheets are created');
                 }
             }
         }
