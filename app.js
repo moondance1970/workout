@@ -571,24 +571,40 @@ class WorkoutTracker {
                 let foundSessionsSheet = null;
                 
                 if (!staticSheetId) {
+                    // Search for sheets that start with "Workout Tracker - Config"
                     const staticSheets = await this.findSheetByName(staticSheetName);
-                    if (staticSheets.length > 0) {
-                        foundStaticSheet = staticSheets[0];
+                    // Filter to only sheets that start with the exact base name (exclude OLD/Migrated)
+                    const validStaticSheets = staticSheets.filter(sheet => 
+                        sheet.name.startsWith('Workout Tracker - Config') && 
+                        !sheet.name.includes('OLD') && 
+                        !sheet.name.includes('Migrated')
+                    );
+                    // Results are already sorted by modifiedTime desc from the API
+                    if (validStaticSheets.length > 0) {
+                        foundStaticSheet = validStaticSheets[0];
                         staticSheetId = foundStaticSheet.id;
                         this.saveStaticSheetIdForUser(userEmail, staticSheetId);
                         this.staticSheetId = staticSheetId;
-                        console.log('Found static sheet:', staticSheetId);
+                        console.log('Found static sheet:', staticSheetId, 'Name:', foundStaticSheet.name);
                     }
                 }
                 
                 if (!sessionsSheetId) {
+                    // Search for sheets that start with "Workout Tracker - Sessions"
                     const sessionsSheets = await this.findSheetByName(sessionsSheetName);
-                    if (sessionsSheets.length > 0) {
-                        foundSessionsSheet = sessionsSheets[0];
+                    // Filter to only sheets that start with the exact base name (exclude OLD/Migrated)
+                    const validSessionsSheets = sessionsSheets.filter(sheet => 
+                        sheet.name.startsWith('Workout Tracker - Sessions') && 
+                        !sheet.name.includes('OLD') && 
+                        !sheet.name.includes('Migrated')
+                    );
+                    // Results are already sorted by modifiedTime desc from the API
+                    if (validSessionsSheets.length > 0) {
+                        foundSessionsSheet = validSessionsSheets[0];
                         sessionsSheetId = foundSessionsSheet.id;
                         this.saveSessionsSheetIdForUser(userEmail, sessionsSheetId);
                         this.sessionsSheetId = sessionsSheetId;
-                        console.log('Found sessions sheet:', sessionsSheetId);
+                        console.log('Found sessions sheet:', sessionsSheetId, 'Name:', foundSessionsSheet.name);
                     }
                 }
                 
@@ -4364,9 +4380,11 @@ class WorkoutTracker {
             // Escape single quotes in sheet name for the query
             const escapedName = sheetName.replace(/'/g, "\\'");
             
-            console.log('Searching for sheet with name:', sheetName, '(drive.file scope - only finds app-created or user-selected files)');
+            // Search for sheets that start with the base name (to catch sheets with dates)
+            // Use 'contains' to find sheets that start with the name
+            console.log('Searching for sheet with name starting with:', sheetName, '(drive.file scope - only finds app-created or user-selected files)');
             const response = await gapi.client.drive.files.list({
-                q: `name='${escapedName}' and mimeType='application/vnd.google-apps.spreadsheet' and trashed=false`,
+                q: `name contains '${escapedName}' and mimeType='application/vnd.google-apps.spreadsheet' and trashed=false`,
                 fields: 'files(id, name, modifiedTime)',
                 orderBy: 'modifiedTime desc'
             });
