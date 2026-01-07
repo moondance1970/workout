@@ -619,22 +619,67 @@ class WorkoutTracker {
                     }
                 }
                 
-                // If either sheet is still missing, create both
+                // If either sheet is still missing, check for old sheet to migrate before creating new ones
                 if (!staticSheetId || !sessionsSheetId) {
-                    console.log('Creating both sheets...');
-                    const { staticSheetId: newStaticId, sessionsSheetId: newSessionsId } = await this.createBothSheets();
-                    if (!staticSheetId) {
-                        staticSheetId = newStaticId;
-                        this.staticSheetId = staticSheetId;
-                    }
-                    if (!sessionsSheetId) {
-                        sessionsSheetId = newSessionsId;
-                        this.sessionsSheetId = sessionsSheetId;
-                    }
-                    
-                    const sheetStatus = document.getElementById('sheet-status');
-                    if (sheetStatus) {
-                        sheetStatus.innerHTML = '<p style="color: green;">✓ Created and connected to your sheets</p>';
+                    // Try to find old "Workout Tracker" sheet to migrate from
+                    try {
+                        const oldSheets = await this.findSheetByName('Workout Tracker');
+                        const actualOldSheet = oldSheets.find(s => 
+                            s.name === 'Workout Tracker' && 
+                            !s.name.includes('Config') && 
+                            !s.name.includes('Sessions') &&
+                            !s.name.includes('OLD') &&
+                            !s.name.includes('Migrated')
+                        );
+                        
+                        if (actualOldSheet) {
+                            console.log('Found old sheet to migrate:', actualOldSheet.id);
+                            // Perform migration
+                            const { staticSheetId: migratedStaticId, sessionsSheetId: migratedSessionsId } = await this.migrateToTwoSheets(actualOldSheet.id);
+                            staticSheetId = migratedStaticId;
+                            sessionsSheetId = migratedSessionsId;
+                            this.staticSheetId = staticSheetId;
+                            this.sessionsSheetId = sessionsSheetId;
+                            
+                            const sheetStatus = document.getElementById('sheet-status');
+                            if (sheetStatus) {
+                                sheetStatus.innerHTML = '<p style="color: green;">✓ Migrated data from old sheet to new sheets</p>';
+                            }
+                        } else {
+                            // No old sheet found, create new empty sheets
+                            console.log('No old sheet found, creating new sheets...');
+                            const { staticSheetId: newStaticId, sessionsSheetId: newSessionsId } = await this.createBothSheets();
+                            if (!staticSheetId) {
+                                staticSheetId = newStaticId;
+                                this.staticSheetId = staticSheetId;
+                            }
+                            if (!sessionsSheetId) {
+                                sessionsSheetId = newSessionsId;
+                                this.sessionsSheetId = sessionsSheetId;
+                            }
+                            
+                            const sheetStatus = document.getElementById('sheet-status');
+                            if (sheetStatus) {
+                                sheetStatus.innerHTML = '<p style="color: green;">✓ Created and connected to your sheets</p>';
+                            }
+                        }
+                    } catch (migrationError) {
+                        console.warn('Error checking for old sheet, creating new sheets:', migrationError);
+                        // Fallback: create new sheets if migration check fails
+                        const { staticSheetId: newStaticId, sessionsSheetId: newSessionsId } = await this.createBothSheets();
+                        if (!staticSheetId) {
+                            staticSheetId = newStaticId;
+                            this.staticSheetId = staticSheetId;
+                        }
+                        if (!sessionsSheetId) {
+                            sessionsSheetId = newSessionsId;
+                            this.sessionsSheetId = sessionsSheetId;
+                        }
+                        
+                        const sheetStatus = document.getElementById('sheet-status');
+                        if (sheetStatus) {
+                            sheetStatus.innerHTML = '<p style="color: green;">✓ Created and connected to your sheets</p>';
+                        }
                     }
                 }
             } catch (error) {
