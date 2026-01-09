@@ -6886,6 +6886,34 @@ class WorkoutTracker {
         // No local data to clear
     }
 
+    showVictoryModal(planName) {
+        const modal = document.getElementById('victory-modal');
+        const planNameEl = document.getElementById('victory-plan-name');
+        const closeBtn = document.getElementById('victory-close-btn');
+        
+        if (modal && planNameEl) {
+            planNameEl.textContent = planName;
+            modal.style.display = 'flex';
+            
+            // Close modal when button is clicked
+            if (closeBtn) {
+                closeBtn.onclick = () => {
+                    modal.style.display = 'none';
+                    this.updatePlanIndicator(); // Update indicator to hide plan mode
+                };
+            }
+            
+            // Also close on backdrop click
+            const backdrop = modal.querySelector('.victory-backdrop');
+            if (backdrop) {
+                backdrop.onclick = () => {
+                    modal.style.display = 'none';
+                    this.updatePlanIndicator(); // Update indicator to hide plan mode
+                };
+            }
+        }
+    }
+
     updateSyncStatus() {
         const indicator = document.getElementById('sync-indicator');
         const text = document.getElementById('sync-text');
