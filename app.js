@@ -1807,8 +1807,14 @@ class WorkoutTracker {
         const timerInput = document.getElementById('new-exercise-timer');
         const youtubeInput = document.getElementById('new-exercise-youtube');
         const aerobicCheckbox = document.getElementById('new-exercise-aerobic');
+        const addBtn = document.getElementById('add-exercise-config');
         
         if (!nameInput || !timerInput || !youtubeInput || !aerobicCheckbox) return;
+        
+        // If we're in edit mode, don't process as add - let updateExerciseConfiguration handle it
+        if (addBtn && addBtn.dataset.editIndex !== undefined) {
+            return;
+        }
         
         const name = nameInput.value.trim();
         if (!name) {
@@ -1900,6 +1906,15 @@ class WorkoutTracker {
         const name = nameInput.value.trim();
         if (!name) {
             alert('Please enter an exercise name');
+            return;
+        }
+        
+        const currentExercise = normalizedList[index];
+        const oldName = currentExercise.name;
+        
+        // If name changed, check if new name already exists
+        if (name !== oldName && this.exerciseListIncludes(name)) {
+            alert('Exercise already exists. Please edit the existing exercise instead.');
             return;
         }
         
