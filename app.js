@@ -188,14 +188,6 @@ class WorkoutTracker {
             // All data loaded
             this.dataLoaded = true;
             this.updateSyncStatus();
-                this.renderHistory();
-            }
-            
-            if (!this.exerciseList || this.exerciseList.length === 0) {
-                console.log('No exercises after autoConnect, attempting to load...');
-                this.exerciseList = await this.loadExerciseList();
-                this.updateExerciseList();
-            }
             
             // Update header buttons (show session, hide login)
             this.updateHeaderButtons();
