@@ -4190,7 +4190,13 @@ class WorkoutTracker {
                     ex.name && ex.name.toLowerCase() === lastExerciseName.toLowerCase()
                 );
                 
-                if (foundExercise && foundExercise.timerDuration) {
+                if (foundExercise && foundExercise.timerDuration !== undefined && foundExercise.timerDuration !== null) {
+                    // If timer is 0, skip the timer (no rest needed)
+                    if (foundExercise.timerDuration === 0) {
+                        console.log('Exercise has no timer (0:00), skipping rest timer');
+                        this.selectFirstExercise(); // Move to next exercise immediately
+                        return;
+                    }
                     timerDuration = foundExercise.timerDuration;
                     console.log('Found exercise with case-insensitive lookup, using timer:', timerDuration, 'seconds');
                 } else {
