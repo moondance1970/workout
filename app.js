@@ -5645,6 +5645,39 @@ class WorkoutTracker {
                 }
             });
 
+            // First, clear all data rows (except header) to remove deleted sessions
+            // Get the sheet metadata to find the last row
+            try {
+                const sheetInfo = await gapi.client.sheets.spreadsheets.get({
+                    spreadsheetId: sessionsSheetId,
+                    ranges: [`${escapedTabName}!A:Z`],
+                    fields: 'sheets.properties.gridProperties'
+                });
+                
+                const sheet = sheetInfo.result.sheets?.find(s => s.properties.title === sheetTabName);
+                const lastRow = sheet?.properties?.gridProperties?.rowCount || 1000;
+                
+                // Clear all data rows from row 2 to the last row
+                if (lastRow > 1) {
+                    await gapi.client.sheets.spreadsheets.values.clear({
+                        spreadsheetId: sessionsSheetId,
+                        range: `${escapedTabName}!A2:Z${lastRow}`
+                    });
+                }
+            } catch (clearError) {
+                // If clearing fails, try clearing a large range as fallback
+                try {
+                    await gapi.client.sheets.spreadsheets.values.clear({
+                        spreadsheetId: sessionsSheetId,
+                        range: `${escapedTabName}!A2:Z10000`
+                    });
+                } catch (fallbackError) {
+                    // If clearing fails completely, continue anyway - the update will overwrite
+                    console.warn('Could not clear sheet before update:', clearError, fallbackError);
+                }
+            }
+            
+            // Now write all current sessions (including header)
             const range = `${escapedTabName}!A1`;
             const response = await gapi.client.sheets.spreadsheets.values.update({
                 spreadsheetId: sessionsSheetId,
