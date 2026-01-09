@@ -1702,8 +1702,29 @@ class WorkoutTracker {
         // Calculate total seconds
         const totalSeconds = (minutes * 60) + seconds;
         
+        // Store old default timer value
+        const oldDefaultTimer = this.defaultTimer;
+        
+        // Update default timer
         this.defaultTimer = totalSeconds;
         this.restTimerDuration = totalSeconds; // Also update current rest timer duration
+        
+        // Update all exercises that were using the old default timer
+        const normalizedList = this.normalizeExerciseList(this.exerciseList);
+        let updatedCount = 0;
+        normalizedList.forEach(exercise => {
+            if (exercise.timerDuration === oldDefaultTimer) {
+                exercise.timerDuration = totalSeconds;
+                updatedCount++;
+            }
+        });
+        
+        // Save updated exercise list if any exercises were updated
+        if (updatedCount > 0) {
+            await this.saveExerciseList();
+            this.updateExerciseList();
+            this.renderExerciseConfigList();
+        }
         
         // Update hidden input for backward compatibility
         const defaultTimerInput = document.getElementById('default-timer');
@@ -1715,7 +1736,11 @@ class WorkoutTracker {
         if (this.isSignedIn && this.getStaticSheetId()) {
             try {
                 await this.saveDefaultTimerToSheet();
-                alert('Default timer saved successfully!');
+                if (updatedCount > 0) {
+                    alert(`Default timer saved successfully! Updated ${updatedCount} exercise${updatedCount !== 1 ? 's' : ''} that were using the old default timer.`);
+                } else {
+                    alert('Default timer saved successfully!');
+                }
             } catch (error) {
                 console.error('Error saving default timer:', error);
                 alert('Error saving default timer. Please try again.');
