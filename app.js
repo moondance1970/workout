@@ -3586,6 +3586,11 @@ class WorkoutTracker {
                 const initialLength = plan.exerciseSlots.length;
                 plan.exerciseSlots = plan.exerciseSlots.filter(slot => slot.exerciseName !== exerciseName);
                 
+                // Renumber remaining slots to start from 1
+                plan.exerciseSlots.forEach((slot, index) => {
+                    slot.slotNumber = index + 1;
+                });
+                
                 // If we removed a slot, save the updated plan
                 if (plan.exerciseSlots.length < initialLength) {
                     await this.saveWorkoutPlans();
