@@ -1702,24 +1702,19 @@ class WorkoutTracker {
         // Calculate total seconds
         const totalSeconds = (minutes * 60) + seconds;
         
-        // Store old default timer value
-        const oldDefaultTimer = this.defaultTimer;
-        
         // Update default timer
         this.defaultTimer = totalSeconds;
         this.restTimerDuration = totalSeconds; // Also update current rest timer duration
         
-        // Update all exercises that were using the old default timer
+        // Update ALL exercises to use the new default timer value
         const normalizedList = this.normalizeExerciseList(this.exerciseList);
         let updatedCount = 0;
         normalizedList.forEach(exercise => {
-            if (exercise.timerDuration === oldDefaultTimer) {
-                exercise.timerDuration = totalSeconds;
-                updatedCount++;
-            }
+            exercise.timerDuration = totalSeconds;
+            updatedCount++;
         });
         
-        // Save updated exercise list if any exercises were updated
+        // Save updated exercise list
         if (updatedCount > 0) {
             await this.saveExerciseList();
             this.updateExerciseList();
