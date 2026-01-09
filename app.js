@@ -1113,7 +1113,6 @@ class WorkoutTracker {
                 reAuthBtn.style.cssText = 'width: auto; padding: 8px 16px; margin-left: 10px; font-size: 12px;';
                 reAuthBtn.textContent = '🔄 Show Consent Screen';
                 reAuthBtn.title = 'Force Google OAuth consent screen to appear (for recording)';
-                reAuthBtn.onclick = () => this.forceReAuthentication();
                 headerButtonContainer.appendChild(reAuthBtn);
             }
             if (sessionBtn) {
