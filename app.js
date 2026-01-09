@@ -36,6 +36,7 @@ class WorkoutTracker {
         this.sessionsSheetId = null; // Sheet ID for private data (workout sessions)
         this.lastSavedExerciseState = null; // Track last saved state for auto-save detection
         this.dataLoaded = false; // Track if all data has been fully loaded
+        this.selectingExercise = false; // Flag to prevent infinite loops in selectFirstExercise
         this.init();
     }
 
@@ -3647,12 +3648,27 @@ class WorkoutTracker {
                     
                     // Check if all exercises are complete
                     if (plan.exerciseSlots.length === 0) {
+                        // Clear the exercise dropdown to show empty state
+                        const exerciseSelect = document.getElementById('exercise-name');
+                        if (exerciseSelect) {
+                            exerciseSelect.innerHTML = '<option value="">Select or type to add new...</option>';
+                        }
+                        
+                        // Clear the form
+                        this.clearFormFields();
+                        
                         // Show victory modal instead of updating indicator
-                        this.showVictoryModal(plan.name);
+                        setTimeout(() => {
+                            this.showVictoryModal(plan.name);
+                        }, 500); // Small delay to ensure DOM is ready
+                        
                         // Deactivate the plan
                         this.activePlanId = null;
                         this.currentPlanIndex = -1;
                         localStorage.removeItem('currentPlanIndex');
+                        
+                        // Update the plan indicator to hide it
+                        this.updatePlanIndicator();
                     } else {
                         // Update the plan indicator to show remaining exercises
                         this.updatePlanIndicator();
