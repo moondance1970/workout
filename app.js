@@ -35,6 +35,7 @@ class WorkoutTracker {
         this.staticSheetId = null; // Sheet ID for static/shared data (Plans, Exercises, Config)
         this.sessionsSheetId = null; // Sheet ID for private data (workout sessions)
         this.lastSavedExerciseState = null; // Track last saved state for auto-save detection
+        this.dataLoaded = false; // Track if all data has been fully loaded
         this.init();
     }
 
@@ -59,6 +60,10 @@ class WorkoutTracker {
         
         // Only load data if signed in - keep empty until login
         if (this.isSignedIn) {
+            // Reset data loaded flag
+            this.dataLoaded = false;
+            this.updateSyncStatus();
+            
             // Load user info and auto-connect to sheet if already signed in
             await this.loadUserInfo();
             
@@ -95,6 +100,10 @@ class WorkoutTracker {
                     this.activePlanId = this.workoutPlans[this.currentPlanIndex].id;
                 }
             }
+            
+            // All data loaded - mark as complete
+            this.dataLoaded = true;
+            this.updateSyncStatus();
         } else {
             // Keep empty until login
             this.sessions = [];
@@ -152,9 +161,10 @@ class WorkoutTracker {
             this.isSignedIn = true;
             // Load user info (which will auto-connect to sheet, create if needed, sync, and render)
             // This already handles loading sessions, exercises, and rendering
+            this.dataLoaded = false;
+            this.updateSyncStatus();
             await this.loadUserInfo();
             this.initGoogleSheets();
-            this.updateSyncStatus();
             
             // Ensure UI is up to date (loadUserInfo/autoConnectSheet should have already done this)
             // But do a final check to make sure data is loaded
@@ -163,6 +173,21 @@ class WorkoutTracker {
                 this.sessions = await this.loadSessions();
                 this.currentSession = this.getTodaySession();
                 this.renderTodayWorkout();
+            }
+            
+            // Ensure all data is loaded
+            if (!this.exerciseList || this.exerciseList.length === 0) {
+                this.exerciseList = await this.loadExerciseList();
+                this.updateExerciseList();
+            }
+            
+            if (!this.workoutPlans || this.workoutPlans.length === 0) {
+                this.workoutPlans = await this.loadWorkoutPlans();
+            }
+            
+            // All data loaded
+            this.dataLoaded = true;
+            this.updateSyncStatus();
                 this.renderHistory();
             }
             
@@ -251,8 +276,20 @@ class WorkoutTracker {
             this.googleToken = existingToken;
             this.isSignedIn = true;
             this.updateHeaderButtons();
+            this.dataLoaded = false;
+            this.updateSyncStatus();
             await this.loadUserInfo();
             this.initGoogleSheets();
+            
+            // Ensure all data is loaded
+            this.sessions = await this.loadSessions();
+            this.currentSession = this.getTodaySession();
+            this.exerciseList = await this.loadExerciseList();
+            this.updateExerciseList();
+            this.workoutPlans = await this.loadWorkoutPlans();
+            
+            // All data loaded
+            this.dataLoaded = true;
             this.updateSyncStatus();
             return;
         }
@@ -287,8 +324,9 @@ class WorkoutTracker {
                     this.updateHeaderButtons();
                     
                     // Load user info (which will auto-connect to sheet, create if needed, and sync)
+                    this.dataLoaded = false;
+                    this.updateSyncStatus();
                     this.loadUserInfo().then(async () => {
-                        this.updateSyncStatus();
                         await this.initGoogleSheets();
                         
                         // Reload sessions from Google Sheets (source of truth)
@@ -301,6 +339,13 @@ class WorkoutTracker {
                         const exercises = await this.loadExerciseList();
                         this.exerciseList = exercises;
                         this.updateExerciseList();
+                        
+                        // Load workout plans
+                        this.workoutPlans = await this.loadWorkoutPlans();
+                        
+                        // All data loaded
+                        this.dataLoaded = true;
+                        this.updateSyncStatus();
                     });
                 } else if (tokenResponse.error) {
                     console.error('Sign-in error:', tokenResponse.error);
@@ -6841,9 +6886,14 @@ class WorkoutTracker {
         const indicator = document.getElementById('sync-indicator');
         const text = document.getElementById('sync-text');
         
-        if (this.isSignedIn && this.sheetId) {
+        // Only show green when signed in, connected to sheet, AND all data is loaded
+        if (this.isSignedIn && this.sheetId && this.dataLoaded) {
             if (indicator) indicator.textContent = '🟢';
             if (text) text.textContent = 'Connected';
+        } else if (this.isSignedIn && this.sheetId) {
+            // Signed in and connected but data still loading
+            if (indicator) indicator.textContent = '🟡';
+            if (text) text.textContent = 'Loading...';
         } else if (this.isSignedIn) {
             if (indicator) indicator.textContent = '🟡';
             if (text) text.textContent = 'Signed In';
