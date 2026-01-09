@@ -222,7 +222,7 @@ class WorkoutTracker {
                 this.googleConfig = await response.json();
                 // Check if CLIENT_ID is actually set (not empty string)
                 if (this.googleConfig && this.googleConfig.CLIENT_ID) {
-                    return this.googleConfig;
+                return this.googleConfig;
                 } else {
                     console.error('Config loaded but CLIENT_ID is empty. Check Vercel environment variables: GOOGLE_CLIENT_ID and GOOGLE_API_KEY');
                 }
@@ -317,7 +317,7 @@ class WorkoutTracker {
                     
                     // Load user info (which will auto-connect to sheet, create if needed, and sync)
                     this.dataLoaded = false;
-                    this.updateSyncStatus();
+                        this.updateSyncStatus();
                     this.loadUserInfo().then(async () => {
                         await this.initGoogleSheets();
                         
@@ -502,15 +502,15 @@ class WorkoutTracker {
             if (oldSheetId && (!staticSheetId || !sessionsSheetId)) {
                 // Verify this is actually an old sheet (not already migrated)
                 // Check if the sheet name contains "Config" or "Sessions" - if so, it's already migrated
-                try {
-                    await this.initGoogleSheets();
-                    if (gapi.client) {
-                        gapi.client.setToken({ access_token: this.googleToken });
-                    }
-                    
+            try {
+                await this.initGoogleSheets();
+                if (gapi.client) {
+                    gapi.client.setToken({ access_token: this.googleToken });
+                }
+                
                     const sheetInfo = await gapi.client.sheets.spreadsheets.get({
                         spreadsheetId: oldSheetId
-                    });
+                });
                     const sheetName = sheetInfo.result?.properties?.title || '';
                     
                     // If sheet name contains "Config" or "Sessions", it's already a new format sheet
@@ -540,7 +540,7 @@ class WorkoutTracker {
                             delete userSheetIds[userEmail];
                             localStorage.setItem('userSheetIds', JSON.stringify(userSheetIds));
                         }
-                        localStorage.removeItem('sheetId');
+                localStorage.removeItem('sheetId');
                         
                         // Complete connection with new sheets
                         await this.completeSheetConnection(sessionsSheetId);
@@ -553,7 +553,7 @@ class WorkoutTracker {
                             localStorage.setItem('userSheetIds', JSON.stringify(userSheetIds));
                         }
                         localStorage.removeItem('sheetId');
-                    }
+            }
                 } catch (error) {
                     // Sheet doesn't exist (404) or is inaccessible
                     console.warn('Old sheet ID is invalid or inaccessible (404/403):', error);
@@ -655,8 +655,8 @@ class WorkoutTracker {
                         this.sessionsSheetId = sessionsSheetId;
                         console.log('Found sessions sheet:', sessionsSheetId, 'Name:', foundSessionsSheet.name);
                     }
-                }
-                
+                            }
+                            
                 // If either sheet is still missing, check for old sheet to migrate before creating new ones
                 if (!staticSheetId || !sessionsSheetId) {
                     // Try to find old "Workout Tracker" sheet to migrate from
@@ -679,10 +679,10 @@ class WorkoutTracker {
                             this.staticSheetId = staticSheetId;
                             this.sessionsSheetId = sessionsSheetId;
                             
-                            const sheetStatus = document.getElementById('sheet-status');
-                            if (sheetStatus) {
+                        const sheetStatus = document.getElementById('sheet-status');
+                        if (sheetStatus) {
                                 sheetStatus.innerHTML = '<p style="color: green;">✓ Migrated data from old sheet to new sheets</p>';
-                            }
+                    }
                         } else {
                             // No old sheet found, create new empty sheets
                             console.log('No old sheet found, creating new sheets...');
@@ -695,11 +695,11 @@ class WorkoutTracker {
                                 sessionsSheetId = newSessionsId;
                                 this.sessionsSheetId = sessionsSheetId;
                             }
-                            
-                            const sheetStatus = document.getElementById('sheet-status');
-                            if (sheetStatus) {
+                    
+                    const sheetStatus = document.getElementById('sheet-status');
+                    if (sheetStatus) {
                                 sheetStatus.innerHTML = '<p style="color: green;">✓ Created and connected to your sheets</p>';
-                            }
+                    }
                         }
                     } catch (migrationError) {
                         console.warn('Error checking for old sheet, creating new sheets:', migrationError);
@@ -732,13 +732,13 @@ class WorkoutTracker {
                     this.sessionsSheetId = sessionsSheetId;
                 } catch (createError) {
                     console.error('Failed to create sheets as fallback:', createError);
-                    const sheetStatus = document.getElementById('sheet-status');
-                    if (sheetStatus) {
+                const sheetStatus = document.getElementById('sheet-status');
+                if (sheetStatus) {
                         sheetStatus.innerHTML = '<p style="color: red;">Error creating sheets. Please try again.</p>';
-                    }
-                    return;
                 }
+                return;
             }
+        }
         }
         
         // Complete connection with sessions sheet (for backward compatibility)
@@ -875,14 +875,14 @@ class WorkoutTracker {
                 // Config tab doesn't need headers, just data in A1
             } else {
                 // Set up headers for Sheet1 (sessions)
-                await gapi.client.sheets.spreadsheets.values.update({
-                    spreadsheetId: spreadsheetId,
-                    range: 'Sheet1!A1:G1',
-                    valueInputOption: 'RAW',
-                    resource: {
-                        values: [['Date', 'Exercise', 'Set', 'Reps', 'Weight (kg)', 'Difficulty', 'Notes']]
-                    }
-                });
+            await gapi.client.sheets.spreadsheets.values.update({
+                spreadsheetId: spreadsheetId,
+                range: 'Sheet1!A1:G1',
+                valueInputOption: 'RAW',
+                resource: {
+                    values: [['Date', 'Exercise', 'Set', 'Reps', 'Weight (kg)', 'Difficulty', 'Notes']]
+                }
+            });
             }
             
             return spreadsheetId;
@@ -989,7 +989,7 @@ class WorkoutTracker {
                         range: 'Plans!A2:F1000'
                     });
                     if (plansData.result.values && plansData.result.values.length > 0) {
-                        await gapi.client.sheets.spreadsheets.values.update({
+            await gapi.client.sheets.spreadsheets.values.update({
                             spreadsheetId: staticSheetId,
                             range: 'Plans!A2',
                             valueInputOption: 'RAW',
@@ -1013,8 +1013,8 @@ class WorkoutTracker {
                         // Copy all rows including header
                         await gapi.client.sheets.spreadsheets.values.update({
                             spreadsheetId: staticSheetId,
-                            range: 'Exercises!A1',
-                            valueInputOption: 'RAW',
+                range: 'Exercises!A1',
+                valueInputOption: 'RAW',
                             resource: { values: exercisesData.result.values }
                         });
                         console.log('Copied Exercises tab:', exercisesData.result.values.length, 'rows');
@@ -1080,7 +1080,7 @@ class WorkoutTracker {
                 const oldSheetName = oldSheetResponse.result.properties.title;
                 await gapi.client.sheets.spreadsheets.batchUpdate({
                     spreadsheetId: oldSheetId,
-                    resource: {
+                resource: {
                         requests: [{
                             updateSpreadsheetProperties: {
                                 properties: {
@@ -1089,8 +1089,8 @@ class WorkoutTracker {
                                 fields: 'title'
                             }
                         }]
-                    }
-                });
+                }
+            });
                 console.log('Archived old sheet');
             } catch (e) {
                 console.warn('Error archiving old sheet:', e);
@@ -1326,19 +1326,19 @@ class WorkoutTracker {
             // Otherwise, initialize both together
             if (!gapi.client.drive) {
                 if (gapi.client.sheets) {
-                    // Sheets already initialized, add Drive API
+                // Sheets already initialized, add Drive API
                     try {
-                        await gapi.client.load('drive', 'v3');
+                await gapi.client.load('drive', 'v3');
                     } catch (loadError) {
                         console.warn('Failed to load Drive API separately, re-initializing with both APIs:', loadError);
                         // If loading fails, re-initialize with both APIs
-                        await gapi.client.init({
-                            apiKey: apiKey,
-                            discoveryDocs: [
-                                'https://sheets.googleapis.com/$discovery/rest?version=v4',
-                                'https://www.googleapis.com/discovery/v1/apis/drive/v3/rest'
-                            ],
-                        });
+                    await gapi.client.init({
+                        apiKey: apiKey,
+                        discoveryDocs: [
+                            'https://sheets.googleapis.com/$discovery/rest?version=v4',
+                            'https://www.googleapis.com/discovery/v1/apis/drive/v3/rest'
+                        ],
+                    });
                     }
                 } else {
                     // Initialize both APIs together
@@ -3450,19 +3450,19 @@ class WorkoutTracker {
             if (setsInput && setsInput.parentElement) {
                 setsInput.parentElement.style.display = 'block';
             }
-            
-            for (let i = 1; i <= sets; i++) {
-                const group = document.createElement('div');
-                group.className = 'rep-input-group';
-                group.innerHTML = `
-                    <label>Set ${i}:</label>
-                    <div style="display: flex; gap: 10px; align-items: center;">
-                        <input type="number" class="rep-input" data-set="${i}" placeholder="Reps" min="0" value="0" style="width: 80px;">
-                        <span>×</span>
-                        <input type="number" class="weight-input" data-set="${i}" placeholder="Weight (kg)" min="0" step="0.5" value="0" style="width: 100px;">
-                    </div>
-                `;
-                container.appendChild(group);
+        
+        for (let i = 1; i <= sets; i++) {
+            const group = document.createElement('div');
+            group.className = 'rep-input-group';
+            group.innerHTML = `
+                <label>Set ${i}:</label>
+                <div style="display: flex; gap: 10px; align-items: center;">
+                    <input type="number" class="rep-input" data-set="${i}" placeholder="Reps" min="0" value="0" style="width: 80px;">
+                    <span>×</span>
+                    <input type="number" class="weight-input" data-set="${i}" placeholder="Weight (kg)" min="0" step="0.5" value="0" style="width: 100px;">
+                </div>
+            `;
+            container.appendChild(group);
             }
         }
     }
@@ -3573,24 +3573,24 @@ class WorkoutTracker {
         } else {
             // Handle non-aerobic exercise - get reps and weights
             const sets = parseInt(document.getElementById('sets').value) || 3;
-            const reps = [];
-            const weights = [];
-            document.querySelectorAll('.rep-input').forEach(input => {
-                reps.push(parseInt(input.value) || 0);
-            });
-            document.querySelectorAll('.weight-input').forEach(input => {
-                weights.push(parseFloat(input.value) || 0);
-            });
+        const reps = [];
+        const weights = [];
+        document.querySelectorAll('.rep-input').forEach(input => {
+            reps.push(parseInt(input.value) || 0);
+        });
+        document.querySelectorAll('.weight-input').forEach(input => {
+            weights.push(parseFloat(input.value) || 0);
+        });
 
             exercise = {
-                name: exerciseName,
-                weights: weights, // Array of weights, one per set
-                sets: sets,
-                reps: reps,
-                difficulty: difficulty,
-                notes: notes,
-                timestamp: new Date().toISOString()
-            };
+            name: exerciseName,
+            weights: weights, // Array of weights, one per set
+            sets: sets,
+            reps: reps,
+            difficulty: difficulty,
+            notes: notes,
+            timestamp: new Date().toISOString()
+        };
         }
 
         // Add to today's session
@@ -3678,14 +3678,14 @@ class WorkoutTracker {
         
         // Clear form (wrap in try-catch to prevent errors from stopping timer)
         try {
-            this.clearForm();
+        this.clearForm();
         } catch (error) {
             console.error('Error clearing form:', error);
         }
         
         // Start rest timer after saving exercise (always try to start, even if form clearing failed)
         try {
-            this.startRestTimer();
+        this.startRestTimer();
         } catch (error) {
             console.error('Error starting rest timer:', error);
         }
@@ -3882,7 +3882,7 @@ class WorkoutTracker {
             detailsStr = `Duration: ${this.formatExerciseDuration(lastExercise.duration)}`;
         } else {
             // Show reps/weights for non-aerobic exercises
-            const lastWeights = lastExercise.weights || (lastExercise.weight ? Array(lastExercise.reps.length).fill(lastExercise.weight) : []);
+        const lastWeights = lastExercise.weights || (lastExercise.weight ? Array(lastExercise.reps.length).fill(lastExercise.weight) : []);
             detailsStr = lastWeights.map((w, i) => `${lastExercise.reps[i] || 0} reps × ${w || 0}kg`).join(', ');
         }
         
@@ -3923,58 +3923,58 @@ class WorkoutTracker {
             }
         } else {
             // Handle non-aerobic exercise - populate reps and weights
-            // Debug logging
-            console.log('populateFormFromLastExercise called with:', {
-                name: lastExercise.name,
-                sets: lastExercise.sets,
-                setsType: typeof lastExercise.sets,
-                isArray: Array.isArray(lastExercise.sets),
-                reps: lastExercise.reps,
-                repsLength: lastExercise.reps?.length,
-                weights: lastExercise.weights,
-                weightsLength: lastExercise.weights?.length
-            });
-            
-            // Ensure sets is a number, not an array
-            let numSets = 3;
-            if (Array.isArray(lastExercise.sets)) {
-                numSets = lastExercise.sets.length;
-                console.log('Sets is array, length:', numSets);
-            } else if (typeof lastExercise.sets === 'number') {
-                numSets = lastExercise.sets;
-                console.log('Sets is number:', numSets);
-                // Cap at reasonable maximum
-                if (numSets > 20) {
-                    console.warn('Sets value too high:', numSets, 'capping at reps length or 20');
-                    numSets = lastExercise.reps?.length || Math.min(numSets, 20);
-                }
-            } else if (lastExercise.reps && Array.isArray(lastExercise.reps)) {
-                numSets = lastExercise.reps.length;
-                console.log('Using reps length as sets:', numSets);
+        // Debug logging
+        console.log('populateFormFromLastExercise called with:', {
+            name: lastExercise.name,
+            sets: lastExercise.sets,
+            setsType: typeof lastExercise.sets,
+            isArray: Array.isArray(lastExercise.sets),
+            reps: lastExercise.reps,
+            repsLength: lastExercise.reps?.length,
+            weights: lastExercise.weights,
+            weightsLength: lastExercise.weights?.length
+        });
+        
+        // Ensure sets is a number, not an array
+        let numSets = 3;
+        if (Array.isArray(lastExercise.sets)) {
+            numSets = lastExercise.sets.length;
+            console.log('Sets is array, length:', numSets);
+        } else if (typeof lastExercise.sets === 'number') {
+            numSets = lastExercise.sets;
+            console.log('Sets is number:', numSets);
+            // Cap at reasonable maximum
+            if (numSets > 20) {
+                console.warn('Sets value too high:', numSets, 'capping at reps length or 20');
+                numSets = lastExercise.reps?.length || Math.min(numSets, 20);
             }
-            
-            console.log('Final numSets:', numSets);
-            
-            // Set sets (this will trigger updateRepsInputs)
-            document.getElementById('sets').value = numSets;
-            
-            // Update reps inputs first (creates the right number of inputs)
-            this.updateRepsInputs();
-            
-            // Then populate each rep input and weight input
-            const repInputs = document.querySelectorAll('.rep-input');
-            const weightInputs = document.querySelectorAll('.weight-input');
-            const weights = lastExercise.weights || (lastExercise.weight ? Array(lastExercise.reps.length).fill(lastExercise.weight) : []);
-            
-            if (lastExercise.reps && lastExercise.reps.length > 0) {
-                lastExercise.reps.forEach((rep, index) => {
-                    if (repInputs[index]) {
-                        repInputs[index].value = rep || 0;
-                    }
-                    if (weightInputs[index]) {
-                        weightInputs[index].value = weights[index] || 0;
-                    }
-                });
+        } else if (lastExercise.reps && Array.isArray(lastExercise.reps)) {
+            numSets = lastExercise.reps.length;
+            console.log('Using reps length as sets:', numSets);
+        }
+        
+        console.log('Final numSets:', numSets);
+        
+        // Set sets (this will trigger updateRepsInputs)
+        document.getElementById('sets').value = numSets;
+        
+        // Update reps inputs first (creates the right number of inputs)
+        this.updateRepsInputs();
+        
+        // Then populate each rep input and weight input
+        const repInputs = document.querySelectorAll('.rep-input');
+        const weightInputs = document.querySelectorAll('.weight-input');
+        const weights = lastExercise.weights || (lastExercise.weight ? Array(lastExercise.reps.length).fill(lastExercise.weight) : []);
+        
+        if (lastExercise.reps && lastExercise.reps.length > 0) {
+            lastExercise.reps.forEach((rep, index) => {
+                if (repInputs[index]) {
+                    repInputs[index].value = rep || 0;
+                }
+                if (weightInputs[index]) {
+                    weightInputs[index].value = weights[index] || 0;
+                }
+            });
             }
         }
         
@@ -4529,8 +4529,8 @@ class WorkoutTracker {
                 detailsHtml = `<div class="details">Duration: ${durationStr}</div>`;
             } else {
                 // Show reps/weights for non-aerobic exercises
-                const weights = exercise.weights || (exercise.weight ? Array(exercise.reps.length).fill(exercise.weight) : []);
-                const weightDetails = weights.map((w, i) => `Set ${i + 1}: ${exercise.reps[i] || 0} reps × ${w || 0}kg`).join(', ');
+            const weights = exercise.weights || (exercise.weight ? Array(exercise.reps.length).fill(exercise.weight) : []);
+            const weightDetails = weights.map((w, i) => `Set ${i + 1}: ${exercise.reps[i] || 0} reps × ${w || 0}kg`).join(', ');
                 detailsHtml = `<div class="details">${weightDetails}</div>`;
             }
             
@@ -4763,43 +4763,43 @@ class WorkoutTracker {
                         detailsStr = `Duration: ${durationStr}`;
                     } else {
                         // Show reps/weights for non-aerobic exercises
-                        const weights = ex.weights || (ex.weight ? Array(ex.reps.length).fill(ex.weight) : []);
-                        const reps = ex.reps || [];
-                        
-                        // Format: show weight only if > 0, otherwise just show reps
-                        // For bodyweight exercises, if all reps are the same, just show "8 reps" instead of "8 reps, 8 reps"
-                        const hasWeight = weights.some(w => w > 0);
-                        
-                        if (hasWeight) {
-                            // Exercise with weights - show each set with weight
-                            const setStrings = [];
-                            for (let i = 0; i < Math.max(reps.length, weights.length); i++) {
-                                const rep = reps[i] || 0;
-                                const weight = weights[i] || 0;
-                                if (weight > 0) {
-                                    setStrings.push(`${rep}×${weight}kg`);
-                                } else if (rep > 0) {
-                                    setStrings.push(`${rep} reps`);
-                                }
+                    const weights = ex.weights || (ex.weight ? Array(ex.reps.length).fill(ex.weight) : []);
+                    const reps = ex.reps || [];
+                    
+                    // Format: show weight only if > 0, otherwise just show reps
+                    // For bodyweight exercises, if all reps are the same, just show "8 reps" instead of "8 reps, 8 reps"
+                    const hasWeight = weights.some(w => w > 0);
+                    
+                    if (hasWeight) {
+                        // Exercise with weights - show each set with weight
+                        const setStrings = [];
+                        for (let i = 0; i < Math.max(reps.length, weights.length); i++) {
+                            const rep = reps[i] || 0;
+                            const weight = weights[i] || 0;
+                            if (weight > 0) {
+                                setStrings.push(`${rep}×${weight}kg`);
+                            } else if (rep > 0) {
+                                setStrings.push(`${rep} reps`);
                             }
-                            detailsStr = setStrings.join(', ');
+                        }
+                        detailsStr = setStrings.join(', ');
+                    } else {
+                        // Bodyweight exercise - show each set or use multiplication format
+                        const validReps = reps.filter(r => r > 0);
+                        if (validReps.length === 0) {
+                            detailsStr = '';
+                        } else if (validReps.length === 1) {
+                            // Single set
+                            detailsStr = `${validReps[0]} reps`;
                         } else {
-                            // Bodyweight exercise - show each set or use multiplication format
-                            const validReps = reps.filter(r => r > 0);
-                            if (validReps.length === 0) {
-                                detailsStr = '';
-                            } else if (validReps.length === 1) {
-                                // Single set
-                                detailsStr = `${validReps[0]} reps`;
+                            // Multiple sets - check if all same
+                            const uniqueReps = [...new Set(validReps)];
+                            if (uniqueReps.length === 1) {
+                                // All sets have same reps - show "2 × 8 reps"
+                                detailsStr = `${validReps.length} × ${uniqueReps[0]} reps`;
                             } else {
-                                // Multiple sets - check if all same
-                                const uniqueReps = [...new Set(validReps)];
-                                if (uniqueReps.length === 1) {
-                                    // All sets have same reps - show "2 × 8 reps"
-                                    detailsStr = `${validReps.length} × ${uniqueReps[0]} reps`;
-                                } else {
-                                    // Different reps per set - show "8 reps, 10 reps"
-                                    detailsStr = validReps.map(r => `${r} reps`).join(', ');
+                                // Different reps per set - show "8 reps, 10 reps"
+                                detailsStr = validReps.map(r => `${r} reps`).join(', ');
                                 }
                             }
                         }
@@ -5504,7 +5504,7 @@ class WorkoutTracker {
                 return name === currentValue;
             });
             if (inFilteredList) {
-                select.value = currentValue;
+            select.value = currentValue;
             }
         }
     }
