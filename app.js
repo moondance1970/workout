@@ -422,9 +422,37 @@ class WorkoutTracker {
         this.renderHistory();
         this.updateSyncStatus();
         
-        // Now request new token - this will show the consent screen
-        alert('Access cleared. Click "Sign in with Google" to see the consent screen again.');
-        await this.requestAccessToken();
+        // Use redirect flow instead of popup for easier screen recording
+        await this.requestAccessTokenWithRedirect();
+    }
+
+    async requestAccessTokenWithRedirect() {
+        // Use redirect flow instead of popup for screen recording
+        const clientId = await this.getClientId();
+        if (!clientId) {
+            alert('Google OAuth Client ID not configured.');
+            return;
+        }
+
+        const scopes = 'https://www.googleapis.com/auth/spreadsheets https://www.googleapis.com/auth/drive.file https://www.googleapis.com/auth/userinfo.email https://www.googleapis.com/auth/userinfo.profile';
+        const redirectUri = window.location.origin + window.location.pathname;
+        const state = 'recording_' + Date.now(); // Unique state for this request
+        
+        // Store state to verify on return
+        sessionStorage.setItem('oauth_state', state);
+        sessionStorage.setItem('oauth_redirect', 'true');
+        
+        // Build OAuth URL with prompt=consent to force consent screen
+        const authUrl = `https://accounts.google.com/o/oauth2/v2/auth?` +
+            `client_id=${encodeURIComponent(clientId)}` +
+            `&redirect_uri=${encodeURIComponent(redirectUri)}` +
+            `&response_type=token` +
+            `&scope=${encodeURIComponent(scopes)}` +
+            `&state=${encodeURIComponent(state)}` +
+            `&prompt=consent`; // Force consent screen to appear
+        
+        // Redirect to Google OAuth (will show consent screen in main window)
+        window.location.href = authUrl;
     }
 
     requestAccessTokenPromise() {
