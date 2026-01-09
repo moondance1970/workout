@@ -34,6 +34,7 @@ class WorkoutTracker {
         this.duplicateSheetsToDelete = []; // Store duplicate sheets that can be deleted after user confirms
         this.staticSheetId = null; // Sheet ID for static/shared data (Plans, Exercises, Config)
         this.sessionsSheetId = null; // Sheet ID for private data (workout sessions)
+        this.lastSavedExerciseState = null; // Track last saved state for auto-save detection
         this.init();
     }
 
@@ -1369,8 +1370,14 @@ class WorkoutTracker {
         }
         
         // Exercise name select change handler
-        document.getElementById('exercise-name').addEventListener('change', (e) => {
+        document.getElementById('exercise-name').addEventListener('change', async (e) => {
             const selectedExercise = e.target.value.trim();
+            
+            // Check if there are unsaved changes to weight or reps before switching
+            if (this.hasUnsavedWeightOrRepsChanges()) {
+                // Auto-save current exercise before switching
+                await this.saveExercise();
+            }
             
             // Clear timer completely when a new exercise is selected
             if (selectedExercise && selectedExercise !== '') {
@@ -1390,6 +1397,11 @@ class WorkoutTracker {
                 // Update reps/duration inputs based on exercise type
                 this.updateRepsInputs();
                 
+                // Store initial state after switching (use setTimeout to ensure inputs are rendered)
+                setTimeout(() => {
+                    this.storeCurrentExerciseState();
+                }, 100);
+                
                 // Show last time and recommendations for selected exercise
                 this.showExercisePreview(selectedExercise);
             } else {
@@ -1398,6 +1410,7 @@ class WorkoutTracker {
                 container.innerHTML = '<p class="no-data">Select an exercise to see your last session and recommendations</p>';
                 // Reset to default reps/weight inputs
                 this.updateRepsInputs();
+                this.lastSavedExerciseState = null;
             }
         });
 
@@ -1659,7 +1672,7 @@ class WorkoutTracker {
                                         title: 'Config',
                                         gridProperties: {
                                             rowCount: 10,
-                                            columnCount: 1
+                                            columnCount: 2
                                         }
                                     }
                                 }
@@ -1681,6 +1694,110 @@ class WorkoutTracker {
             });
         } catch (error) {
             console.error('Error saving default timer to sheet:', error);
+            throw error;
+        }
+    }
+
+    async loadReceivedPlans() {
+        const staticSheetId = this.getStaticSheetId();
+        if (!this.isSignedIn || !staticSheetId) return [];
+        
+        try {
+            await this.initGoogleSheets();
+            const response = await gapi.client.sheets.spreadsheets.values.get({
+                spreadsheetId: staticSheetId,
+                range: 'Config!B1'
+            });
+            
+            if (response.result.values && response.result.values.length > 0 && response.result.values[0].length > 0) {
+                const plansJson = String(response.result.values[0][0]).trim();
+                if (plansJson) {
+                    try {
+                        return JSON.parse(plansJson);
+                    } catch (e) {
+                        console.warn('Error parsing received plans:', e);
+                        return [];
+                    }
+                }
+            }
+        } catch (error) {
+            // Config sheet might not exist yet, that's okay
+            console.log('Config sheet not found or error loading received plans:', error.message);
+        }
+        return [];
+    }
+
+    async saveReceivedPlanInfo(planId, planName, senderEmail, creatorSheetId, status) {
+        const staticSheetId = this.getStaticSheetId();
+        if (!this.isSignedIn || !staticSheetId) return;
+        
+        try {
+            await this.initGoogleSheets();
+            
+            // Ensure Config sheet exists
+            try {
+                const response = await gapi.client.sheets.spreadsheets.get({
+                    spreadsheetId: staticSheetId
+                });
+                const sheets = response.result.sheets || [];
+                const configSheet = sheets.find(s => s.properties.title === 'Config');
+                
+                if (!configSheet) {
+                    await gapi.client.sheets.spreadsheets.batchUpdate({
+                        spreadsheetId: staticSheetId,
+                        resource: {
+                            requests: [{
+                                addSheet: {
+                                    properties: {
+                                        title: 'Config',
+                                        gridProperties: {
+                                            rowCount: 10,
+                                            columnCount: 2
+                                        }
+                                    }
+                                }
+                            }]
+                        }
+                    });
+                }
+            } catch (error) {
+                console.error('Error checking/creating Config sheet:', error);
+            }
+            
+            // Load existing received plans
+            const receivedPlans = await this.loadReceivedPlans();
+            
+            // Check if plan already exists
+            const existingIndex = receivedPlans.findIndex(p => 
+                p.planId === planId && p.creatorSheetId === creatorSheetId
+            );
+            
+            const planInfo = {
+                planId: planId,
+                planName: planName,
+                senderEmail: senderEmail || '',
+                creatorSheetId: creatorSheetId,
+                receivedAt: new Date().toISOString(),
+                status: status // "imported" or "rejected"
+            };
+            
+            if (existingIndex >= 0) {
+                // Update existing entry
+                receivedPlans[existingIndex] = planInfo;
+            } else {
+                // Add new entry
+                receivedPlans.push(planInfo);
+            }
+            
+            // Save to Config tab
+            await gapi.client.sheets.spreadsheets.values.update({
+                spreadsheetId: staticSheetId,
+                range: 'Config!B1',
+                valueInputOption: 'RAW',
+                resource: { values: [[JSON.stringify(receivedPlans)]] }
+            });
+        } catch (error) {
+            console.error('Error saving received plan info:', error);
             throw error;
         }
     }
@@ -1934,7 +2051,12 @@ class WorkoutTracker {
         
         for (let i = 1; i <= slotsCount; i++) {
             const group = document.createElement('div');
-            group.className = 'form-group';
+            group.className = 'form-group plan-slot-draggable';
+            group.draggable = true;
+            group.dataset.slotIndex = i - 1;
+            group.style.cursor = 'move';
+            group.style.position = 'relative';
+            
             const select = document.createElement('select');
             select.className = 'plan-exercise-slot';
             select.dataset.slot = i;
@@ -1956,9 +2078,56 @@ class WorkoutTracker {
             // Add change event listener to update other dropdowns
             select.addEventListener('change', () => this.updatePlanSlotOptions());
             
-            group.innerHTML = `<label>Exercise Slot ${i}</label>`;
+            // Add drag handle icon
+            const dragHandle = document.createElement('span');
+            dragHandle.innerHTML = '☰';
+            dragHandle.style.cssText = 'position: absolute; left: -20px; top: 50%; transform: translateY(-50%); cursor: move; color: #999; font-size: 18px;';
+            dragHandle.style.pointerEvents = 'none';
+            
+            const label = document.createElement('label');
+            label.textContent = `Exercise Slot ${i}`;
+            
+            group.appendChild(dragHandle);
+            group.appendChild(label);
             group.appendChild(select);
             container.appendChild(group);
+            
+            // Add drag event listeners
+            group.addEventListener('dragstart', (e) => {
+                e.dataTransfer.effectAllowed = 'move';
+                e.dataTransfer.setData('text/plain', group.dataset.slotIndex);
+                group.style.opacity = '0.5';
+            });
+            
+            group.addEventListener('dragend', (e) => {
+                group.style.opacity = '1';
+                // Remove all drag-over classes
+                container.querySelectorAll('.plan-slot-draggable').forEach(g => {
+                    g.classList.remove('drag-over');
+                });
+            });
+            
+            group.addEventListener('dragover', (e) => {
+                e.preventDefault();
+                e.dataTransfer.dropEffect = 'move';
+                group.classList.add('drag-over');
+            });
+            
+            group.addEventListener('dragleave', (e) => {
+                group.classList.remove('drag-over');
+            });
+            
+            group.addEventListener('drop', (e) => {
+                e.preventDefault();
+                group.classList.remove('drag-over');
+                
+                const draggedIndex = parseInt(e.dataTransfer.getData('text/plain'));
+                const targetIndex = parseInt(group.dataset.slotIndex);
+                
+                if (draggedIndex !== targetIndex) {
+                    this.reorderPlanSlots(draggedIndex, targetIndex);
+                }
+            });
         }
         
         // Initial update to filter options
@@ -1966,6 +2135,37 @@ class WorkoutTracker {
         
         document.getElementById('save-plan-btn').style.display = 'inline-block';
         document.getElementById('cancel-plan-btn').style.display = 'inline-block';
+    }
+
+    reorderPlanSlots(draggedIndex, targetIndex) {
+        const container = document.getElementById('plan-exercise-slots');
+        if (!container) return;
+        
+        const groups = Array.from(container.querySelectorAll('.plan-slot-draggable'));
+        const draggedGroup = groups[draggedIndex];
+        const targetGroup = groups[targetIndex];
+        
+        if (draggedIndex < targetIndex) {
+            // Moving down
+            container.insertBefore(draggedGroup, targetGroup.nextSibling);
+        } else {
+            // Moving up
+            container.insertBefore(draggedGroup, targetGroup);
+        }
+        
+        // Update slot indices and labels
+        const updatedGroups = Array.from(container.querySelectorAll('.plan-slot-draggable'));
+        updatedGroups.forEach((group, index) => {
+            group.dataset.slotIndex = index;
+            const select = group.querySelector('.plan-exercise-slot');
+            if (select) {
+                select.dataset.slot = index + 1;
+            }
+            const label = group.querySelector('label');
+            if (label) {
+                label.textContent = `Exercise Slot ${index + 1}`;
+            }
+        });
     }
 
     updatePlanSlotOptions() {
@@ -2024,16 +2224,21 @@ class WorkoutTracker {
             return;
         }
         
-        const slotSelects = document.querySelectorAll('.plan-exercise-slot');
+        // Get slots in DOM order (after drag-and-drop reordering)
+        const container = document.getElementById('plan-exercise-slots');
+        const slotGroups = Array.from(container.querySelectorAll('.plan-slot-draggable'));
         const exerciseSlots = [];
         
-        slotSelects.forEach((select, index) => {
-            const exerciseName = select.value.trim();
-            if (exerciseName) {
-                exerciseSlots.push({
-                    slotNumber: index + 1,
-                    exerciseName: exerciseName
-                });
+        slotGroups.forEach((group, index) => {
+            const select = group.querySelector('.plan-exercise-slot');
+            if (select) {
+                const exerciseName = select.value.trim();
+                if (exerciseName) {
+                    exerciseSlots.push({
+                        slotNumber: index + 1,
+                        exerciseName: exerciseName
+                    });
+                }
             }
         });
         
@@ -2190,11 +2395,25 @@ class WorkoutTracker {
         const plan = this.workoutPlans.find(p => p.id === this.activePlanId);
         if (!plan || !plan.exerciseSlots) return null;
         
-        const planExerciseNames = new Set(plan.exerciseSlots.map(slot => slot.exerciseName));
-        return this.exerciseList.filter(ex => {
+        // Create a map of exercise names to exercise objects for quick lookup
+        const exerciseMap = new Map();
+        this.exerciseList.forEach(ex => {
             const name = typeof ex === 'object' ? ex.name : ex;
-            return planExerciseNames.has(name);
+            exerciseMap.set(name, ex);
         });
+        
+        // Return exercises in the same order as plan.exerciseSlots
+        const orderedExercises = [];
+        plan.exerciseSlots.forEach(slot => {
+            if (slot.exerciseName) {
+                const exercise = exerciseMap.get(slot.exerciseName);
+                if (exercise) {
+                    orderedExercises.push(exercise);
+                }
+            }
+        });
+        
+        return orderedExercises.length > 0 ? orderedExercises : null;
     }
 
     updatePlanIndicator() {
@@ -2443,6 +2662,30 @@ class WorkoutTracker {
         }
         
         try {
+            // Check if plan was already imported or rejected
+            const receivedPlans = await this.loadReceivedPlans();
+            const existingPlan = receivedPlans.find(p => 
+                p.planId === planId && p.creatorSheetId === creatorSheetId
+            );
+            
+            if (existingPlan) {
+                if (existingPlan.status === 'rejected') {
+                    // Silently skip - do not show preview, do not import
+                    window.history.replaceState({}, document.title, window.location.pathname);
+                    return;
+                } else if (existingPlan.status === 'imported') {
+                    // Already imported - directly activate if plan exists
+                    const importedPlan = this.workoutPlans.find(p => 
+                        p.id === planId || (p.creatorSheetId === creatorSheetId && p.name === existingPlan.planName)
+                    );
+                    if (importedPlan) {
+                        this.activatePlan(importedPlan.id);
+                    }
+                    window.history.replaceState({}, document.title, window.location.pathname);
+                    return;
+                }
+            }
+            
             // Fetch plan from creator's sheet
             const plan = await this.fetchPlanFromCreator(planId, creatorSheetId);
             if (!plan) {
@@ -2450,76 +2693,196 @@ class WorkoutTracker {
                 return;
             }
             
-            // Get exercise configurations from creator's sheet
-            const normalizedList = this.normalizeExerciseList(this.exerciseList);
+            // Show preview dialog for new plans
+            await this.showPlanImportPreview(plan, creatorSheetId);
+        } catch (error) {
+            console.error('Error importing plan:', error);
+            alert('Error importing plan. Please try again.');
+        }
+    }
+
+    async showPlanImportPreview(plan, creatorSheetId) {
+        return new Promise((resolve) => {
+            // Create modal overlay
+            const modal = document.createElement('div');
+            modal.style.cssText = `
+                position: fixed;
+                top: 0;
+                left: 0;
+                width: 100%;
+                height: 100%;
+                background: rgba(0, 0, 0, 0.5);
+                z-index: 10000;
+                display: flex;
+                justify-content: center;
+                align-items: center;
+            `;
             
-            // For each exercise in the plan, copy its configuration
-            for (const slot of plan.exerciseSlots) {
-                // Fetch exercise config from creator's Exercises sheet
+            // Create dialog box
+            const dialog = document.createElement('div');
+            dialog.style.cssText = `
+                background: white;
+                border-radius: 8px;
+                padding: 24px;
+                max-width: 600px;
+                width: 90%;
+                max-height: 80vh;
+                overflow-y: auto;
+                box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+            `;
+            
+            // Build exercises list HTML
+            let exercisesHtml = '';
+            if (plan.exerciseSlots && plan.exerciseSlots.length > 0) {
+                exercisesHtml = '<ul style="list-style: none; padding: 0; margin: 10px 0;">';
+                plan.exerciseSlots.forEach((slot, index) => {
+                    exercisesHtml += `<li style="padding: 8px; border-bottom: 1px solid #eee;">
+                        <strong>${index + 1}.</strong> ${slot.exerciseName || '(No exercise)'}
+                    </li>`;
+                });
+                exercisesHtml += '</ul>';
+            } else {
+                exercisesHtml = '<p style="color: #999;">No exercises in this plan.</p>';
+            }
+            
+            dialog.innerHTML = `
+                <h2 style="margin-top: 0;">Import Workout Plan</h2>
+                <div style="margin-bottom: 20px;">
+                    <h3 style="margin-bottom: 10px;">${plan.name || 'Unnamed Plan'}</h3>
+                    <p style="color: #666; margin-bottom: 15px;">You've received a workout plan to import.</p>
+                    <div>
+                        <strong>Exercises in this plan:</strong>
+                        ${exercisesHtml}
+                    </div>
+                </div>
+                <div style="display: flex; gap: 10px; justify-content: flex-end;">
+                    <button id="preview-cancel-btn" class="btn-secondary" style="padding: 10px 20px;">Cancel</button>
+                    <button id="preview-import-btn" class="btn-primary" style="padding: 10px 20px;">Import</button>
+                </div>
+            `;
+            
+            modal.appendChild(dialog);
+            document.body.appendChild(modal);
+            
+            // Handle Cancel button
+            document.getElementById('preview-cancel-btn').addEventListener('click', async () => {
+                // Save as rejected
+                await this.saveReceivedPlanInfo(
+                    plan.id,
+                    plan.name || 'Unnamed Plan',
+                    plan.createdBy || '',
+                    creatorSheetId,
+                    'rejected'
+                );
+                document.body.removeChild(modal);
+                window.history.replaceState({}, document.title, window.location.pathname);
+                resolve();
+            });
+            
+            // Handle Import button
+            document.getElementById('preview-import-btn').addEventListener('click', async () => {
                 try {
-                    const exerciseResponse = await gapi.client.sheets.spreadsheets.values.get({
-                        spreadsheetId: creatorSheetId,
-                        range: 'Exercises!A2:D1000'
-                    });
+                    // Import the plan
+                    await this.doImportPlan(plan, creatorSheetId);
                     
-                    const exerciseRows = exerciseResponse.result.values || [];
-                    for (const row of exerciseRows) {
-                        if (row[0]?.trim() === slot.exerciseName) {
-                            const config = {
-                                timerDuration: this.defaultTimer,
-                                youtubeLink: '',
-                                isAerobic: false
-                            };
-                            
-                            if (row[1]) {
-                                const parsed = this.parseRestTimer(String(row[1]).trim());
-                                if (parsed !== null) {
-                                    config.timerDuration = parsed;
-                                }
-                            }
-                            
-                            if (row[2]) {
-                                config.youtubeLink = String(row[2]).trim();
-                            }
-                            
-                            if (row[3]) {
-                                const aerobicStr = String(row[3]).trim().toLowerCase();
-                                config.isAerobic = aerobicStr === 'true' || aerobicStr === '1' || aerobicStr === 'yes';
-                            }
-                            
-                            await this.copyExerciseConfigToRecipient(slot.exerciseName, config);
-                            break;
-                        }
-                    }
+                    // Save as imported
+                    await this.saveReceivedPlanInfo(
+                        plan.id,
+                        plan.name || 'Unnamed Plan',
+                        plan.createdBy || '',
+                        creatorSheetId,
+                        'imported'
+                    );
+                    
+                    document.body.removeChild(modal);
+                    window.history.replaceState({}, document.title, window.location.pathname);
+                    alert('Plan imported successfully! Your sheet has been set up with all exercises configured.');
+                    resolve();
                 } catch (error) {
-                    console.warn(`Error fetching config for ${slot.exerciseName}:`, error);
-                    // Add exercise with default config if we can't fetch
+                    console.error('Error importing plan:', error);
+                    alert('Error importing plan. Please try again.');
+                    document.body.removeChild(modal);
+                    resolve();
+                }
+            });
+        });
+    }
+
+    async doImportPlan(plan, creatorSheetId) {
+        // Get exercise configurations from creator's sheet
+        const normalizedList = this.normalizeExerciseList(this.exerciseList);
+        
+        // For each exercise in the plan, copy its configuration
+        for (const slot of plan.exerciseSlots) {
+            if (!slot.exerciseName) continue;
+            
+            // Fetch exercise config from creator's Exercises sheet
+            try {
+                const exerciseResponse = await gapi.client.sheets.spreadsheets.values.get({
+                    spreadsheetId: creatorSheetId,
+                    range: 'Exercises!A2:D1000'
+                });
+                
+                const exerciseRows = exerciseResponse.result.values || [];
+                let configFound = false;
+                for (const row of exerciseRows) {
+                    if (row[0]?.trim() === slot.exerciseName) {
+                        const config = {
+                            timerDuration: this.defaultTimer,
+                            youtubeLink: '',
+                            isAerobic: false
+                        };
+                        
+                        if (row[1]) {
+                            const parsed = this.parseRestTimer(String(row[1]).trim());
+                            if (parsed !== null) {
+                                config.timerDuration = parsed;
+                            }
+                        }
+                        
+                        if (row[2]) {
+                            config.youtubeLink = String(row[2]).trim();
+                        }
+                        
+                        if (row[3]) {
+                            const aerobicStr = String(row[3]).trim().toLowerCase();
+                            config.isAerobic = aerobicStr === 'true' || aerobicStr === '1' || aerobicStr === 'yes';
+                        }
+                        
+                        await this.copyExerciseConfigToRecipient(slot.exerciseName, config);
+                        configFound = true;
+                        break;
+                    }
+                }
+                
+                if (!configFound) {
+                    // Add exercise with default config if not found
                     await this.copyExerciseConfigToRecipient(slot.exerciseName, {
                         timerDuration: this.defaultTimer,
                         youtubeLink: '',
                         isAerobic: false
                     });
                 }
+            } catch (error) {
+                console.warn(`Error fetching config for ${slot.exerciseName}:`, error);
+                // Add exercise with default config if we can't fetch
+                await this.copyExerciseConfigToRecipient(slot.exerciseName, {
+                    timerDuration: this.defaultTimer,
+                    youtubeLink: '',
+                    isAerobic: false
+                });
             }
-            
-            // Add plan to recipient's Plans sheet
-            plan.id = `plan_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-            plan.creatorSheetId = staticSheetId;
-            plan.createdBy = this.userEmail || '';
-            this.workoutPlans.push(plan);
-            await this.saveWorkoutPlans();
-            
-            // Activate the plan
-            this.activatePlan(plan.id);
-            
-            // Clear URL parameters
-            window.history.replaceState({}, document.title, window.location.pathname);
-            
-            alert('Plan imported successfully! Your sheet has been set up with all exercises configured.');
-        } catch (error) {
-            console.error('Error importing plan:', error);
-            alert('Error importing plan. Please try again.');
         }
+        
+        // Add plan to recipient's Plans sheet
+        plan.id = `plan_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+        plan.creatorSheetId = this.getStaticSheetId();
+        plan.createdBy = this.userEmail || '';
+        this.workoutPlans.push(plan);
+        await this.saveWorkoutPlans();
+        
+        // Activate the plan
+        this.activatePlan(plan.id);
     }
 
     updateRepsInputs() {
@@ -2774,6 +3137,9 @@ class WorkoutTracker {
         this.renderTodayWorkout();
         this.showRecommendations(exercise);
         
+        // Store state after saving
+        this.storeCurrentExerciseState();
+        
         // Clear form (wrap in try-catch to prevent errors from stopping timer)
         try {
             this.clearForm();
@@ -2806,6 +3172,119 @@ class WorkoutTracker {
                 }
             }
         }
+    }
+
+    storeCurrentExerciseState() {
+        const exerciseName = document.getElementById('exercise-name').value.trim();
+        if (!exerciseName) {
+            this.lastSavedExerciseState = null;
+            return;
+        }
+        
+        // Check if exercise is aerobic
+        const exerciseConfig = this.getExerciseByName(exerciseName);
+        const isAerobic = exerciseConfig && exerciseConfig.isAerobic;
+        
+        if (isAerobic) {
+            // For aerobic exercises, we don't track changes (only weight/reps matter)
+            this.lastSavedExerciseState = null;
+            return;
+        }
+        
+        // For non-aerobic exercises, track sets, reps, and weights
+        const sets = parseInt(document.getElementById('sets').value) || 3;
+        const reps = [];
+        const weights = [];
+        
+        document.querySelectorAll('.rep-input').forEach(input => {
+            reps.push(parseInt(input.value) || 0);
+        });
+        document.querySelectorAll('.weight-input').forEach(input => {
+            weights.push(parseFloat(input.value) || 0);
+        });
+        
+        this.lastSavedExerciseState = {
+            exerciseName: exerciseName,
+            sets: sets,
+            reps: reps,
+            weights: weights
+        };
+    }
+
+    hasUnsavedWeightOrRepsChanges() {
+        if (!this.lastSavedExerciseState) {
+            // No previous state - check if there are any non-zero values
+            const sets = parseInt(document.getElementById('sets').value) || 3;
+            const repInputs = document.querySelectorAll('.rep-input');
+            const weightInputs = document.querySelectorAll('.weight-input');
+            
+            // Check if any rep or weight has a non-zero value
+            let hasValues = false;
+            repInputs.forEach(input => {
+                if (parseInt(input.value) > 0) hasValues = true;
+            });
+            weightInputs.forEach(input => {
+                if (parseFloat(input.value) > 0) hasValues = true;
+            });
+            
+            // If sets changed from default (3), consider it a change
+            if (sets !== 3) hasValues = true;
+            
+            return hasValues;
+        }
+        
+        const currentExerciseName = document.getElementById('exercise-name').value.trim();
+        if (currentExerciseName !== this.lastSavedExerciseState.exerciseName) {
+            // Different exercise - no unsaved changes for current exercise
+            return false;
+        }
+        
+        // Check if exercise is aerobic
+        const exerciseConfig = this.getExerciseByName(currentExerciseName);
+        const isAerobic = exerciseConfig && exerciseConfig.isAerobic;
+        if (isAerobic) {
+            // For aerobic exercises, we don't track weight/reps changes
+            return false;
+        }
+        
+        // Compare sets
+        const currentSets = parseInt(document.getElementById('sets').value) || 3;
+        if (currentSets !== this.lastSavedExerciseState.sets) {
+            return true;
+        }
+        
+        // Compare reps and weights
+        const currentReps = [];
+        const currentWeights = [];
+        
+        document.querySelectorAll('.rep-input').forEach(input => {
+            currentReps.push(parseInt(input.value) || 0);
+        });
+        document.querySelectorAll('.weight-input').forEach(input => {
+            currentWeights.push(parseFloat(input.value) || 0);
+        });
+        
+        // Compare arrays
+        if (currentReps.length !== this.lastSavedExerciseState.reps.length) {
+            return true;
+        }
+        if (currentWeights.length !== this.lastSavedExerciseState.weights.length) {
+            return true;
+        }
+        
+        for (let i = 0; i < currentReps.length; i++) {
+            if (currentReps[i] !== this.lastSavedExerciseState.reps[i]) {
+                return true;
+            }
+        }
+        
+        for (let i = 0; i < currentWeights.length; i++) {
+            if (currentWeights[i] !== this.lastSavedExerciseState.weights[i]) {
+                return true;
+            }
+        }
+        
+        return false;
     }
 
     clearForm() {
@@ -3248,13 +3727,13 @@ class WorkoutTracker {
         this.restTimerSeconds = timerDuration;
         console.log('Timer duration set to:', timerDuration, 'seconds');
         
-        // Show timer display
-        const timerContainer = document.getElementById('rest-timer');
-        if (timerContainer) {
-            timerContainer.style.display = 'block';
-            console.log('Timer container displayed');
+        // Show timer modal
+        const timerModal = document.getElementById('rest-timer-modal');
+        if (timerModal) {
+            timerModal.style.display = 'flex';
+            console.log('Timer modal displayed');
         } else {
-            console.error('Timer container not found!');
+            console.error('Timer modal not found!');
         }
         
         // Update display immediately
@@ -3279,10 +3758,10 @@ class WorkoutTracker {
             this.restTimer = null;
         }
         
-        // Hide timer display
-        const timerContainer = document.getElementById('rest-timer');
-        if (timerContainer) {
-            timerContainer.style.display = 'none';
+        // Hide timer modal
+        const timerModal = document.getElementById('rest-timer-modal');
+        if (timerModal) {
+            timerModal.style.display = 'none';
         }
         
         // Reset display elements
@@ -6348,6 +6827,19 @@ class WorkoutTracker {
             sessionBtn.disabled = false;
             this.updateSessionButton();
             
+            // Show Save Exercise button
+            const saveWorkoutBtn = document.getElementById('save-workout');
+            if (saveWorkoutBtn) {
+                saveWorkoutBtn.style.display = 'inline-block';
+            }
+            
+            // Show Start Session button (it becomes End Session)
+            const startSessionBtn = document.getElementById('start-session-btn');
+            if (startSessionBtn) {
+                startSessionBtn.style.display = 'inline-block';
+                startSessionBtn.textContent = 'End Session';
+            }
+            
             // Update sync status
             this.updateSyncStatus();
             
@@ -6392,6 +6884,18 @@ class WorkoutTracker {
             sessionBtn.disabled = false;
             this.updateSessionButton();
             
+            // Hide Save Exercise button
+            const saveWorkoutBtn = document.getElementById('save-workout');
+            if (saveWorkoutBtn) {
+                saveWorkoutBtn.style.display = 'none';
+            }
+            
+            // Update Start Session button
+            const startSessionBtn = document.getElementById('start-session-btn');
+            if (startSessionBtn) {
+                startSessionBtn.textContent = 'Start Session';
+            }
+            
             // Update sync status
             this.updateSyncStatus();
             
@@ -6426,14 +6930,25 @@ class WorkoutTracker {
         const startSessionBtn = document.getElementById('start-session-btn');
         if (!startSessionBtn) return;
         
+        const saveWorkoutBtn = document.getElementById('save-workout');
+        
         if (this.sessionActive) {
             startSessionBtn.textContent = 'End Session';
             startSessionBtn.style.background = 'rgba(244, 67, 54, 0.9)';
             startSessionBtn.style.borderColor = 'rgba(244, 67, 54, 1)';
+            if (saveWorkoutBtn) {
+                saveWorkoutBtn.style.display = 'inline-block';
+            }
+            if (startSessionBtn) {
+                startSessionBtn.style.display = 'inline-block';
+            }
         } else {
             startSessionBtn.textContent = 'Start Session';
             startSessionBtn.style.background = '';
             startSessionBtn.style.borderColor = '';
+            if (saveWorkoutBtn) {
+                saveWorkoutBtn.style.display = 'none';
+            }
         }
     }
 }

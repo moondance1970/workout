@@ -48,6 +48,7 @@
             </div>
             <div class="session-controls" style="display: flex; gap: 10px; align-items: center; margin-bottom: 20px; flex-wrap: wrap;">
                 <button id="start-session-btn" class="btn-primary" style="width: auto; padding: 10px 20px; display: none;">Start Session</button>
+                <button id="save-workout" class="btn-primary" style="width: auto; padding: 10px 20px; display: none;">Save Exercise</button>
                 <select id="select-plan-dropdown" class="plan-selector" style="display: none;">
                     <option value="">Select Plan...</option>
                 </select>
@@ -78,19 +79,20 @@
                     <label for="notes">Notes</label>
                     <textarea id="notes" placeholder="Any additional notes..." rows="2"></textarea>
                 </div>
-
-                <button id="save-workout" class="btn-primary">Save Exercise</button>
             </div>
 
-            <div id="rest-timer" class="rest-timer" style="display: none;">
-                <h3>⏱️ Rest Timer</h3>
-                <div class="timer-display">
-                    <div class="timer-circle">
-                        <span id="timer-seconds">60</span>
-                        <span class="timer-label">seconds</span>
+            <div id="rest-timer-modal" class="rest-timer-modal" style="display: none;">
+                <div class="rest-timer-backdrop"></div>
+                <div class="rest-timer-content">
+                    <h3>⏱️ Rest Timer</h3>
+                    <div class="timer-display">
+                        <div class="timer-circle">
+                            <span id="timer-seconds">60</span>
+                            <span class="timer-label">seconds</span>
+                        </div>
                     </div>
+                    <button id="skip-timer-btn" class="btn-secondary" style="margin-top: 10px;">Skip Rest</button>
                 </div>
-                <button id="skip-timer-btn" class="btn-secondary" style="margin-top: 10px;">Skip Rest</button>
             </div>
 
             <div id="recommendations" class="recommendations-panel">
