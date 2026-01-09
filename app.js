@@ -4167,12 +4167,30 @@ class WorkoutTracker {
         let timerDuration = this.defaultTimer;
         if (this.currentSession.exercises && this.currentSession.exercises.length > 0) {
             const lastExerciseName = this.currentSession.exercises[this.currentSession.exercises.length - 1].name;
+            console.log('Looking up timer for exercise:', lastExerciseName);
+            
+            // Try to find exercise in list (case-insensitive)
             const exercise = this.getExerciseByName(lastExerciseName);
+            console.log('Found exercise config:', exercise);
+            
             if (exercise && exercise.timerDuration) {
                 timerDuration = exercise.timerDuration;
+                console.log('Using exercise-specific timer:', timerDuration, 'seconds');
             } else {
-                // Use the current default timer (always use the most up-to-date value)
-                timerDuration = this.defaultTimer;
+                // Exercise might have been removed from list, try to find it case-insensitively
+                const normalizedList = this.normalizeExerciseList(this.exerciseList);
+                const foundExercise = normalizedList.find(ex => 
+                    ex.name && ex.name.toLowerCase() === lastExerciseName.toLowerCase()
+                );
+                
+                if (foundExercise && foundExercise.timerDuration) {
+                    timerDuration = foundExercise.timerDuration;
+                    console.log('Found exercise with case-insensitive lookup, using timer:', timerDuration, 'seconds');
+                } else {
+                    // Use the current default timer (always use the most up-to-date value)
+                    console.log('Exercise not found in list, using default timer:', this.defaultTimer, 'seconds');
+                    timerDuration = this.defaultTimer;
+                }
             }
         } else {
             // Use the current default timer (always use the most up-to-date value)
