@@ -3644,8 +3644,20 @@ class WorkoutTracker {
                 // If we removed a slot, save the updated plan
                 if (plan.exerciseSlots.length < initialLength) {
                     await this.saveWorkoutPlans();
-                    // Update the plan indicator to show remaining exercises
-                    this.updatePlanIndicator();
+                    
+                    // Check if all exercises are complete
+                    if (plan.exerciseSlots.length === 0) {
+                        // Show victory modal instead of updating indicator
+                        this.showVictoryModal(plan.name);
+                        // Deactivate the plan
+                        this.activePlanId = null;
+                        this.currentPlanIndex = -1;
+                        localStorage.removeItem('currentPlanIndex');
+                    } else {
+                        // Update the plan indicator to show remaining exercises
+                        this.updatePlanIndicator();
+                    }
+                    
                     // Re-render plan mode tab if it's currently visible
                     const planTab = document.getElementById('plan-tab');
                     if (planTab && planTab.classList.contains('active')) {

@@ -242,6 +242,117 @@ textarea:focus {
     color: white;
 }
 
+/* Victory Modal Styles */
+.victory-modal {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    z-index: 10000;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+}
+
+.victory-backdrop {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(0, 0, 0, 0.7);
+    animation: fadeIn 0.3s ease-in;
+}
+
+.victory-content {
+    position: relative;
+    z-index: 10001;
+    background: linear-gradient(135deg, #f6d365 0%, #fda085 50%, #ff6b6b 100%);
+    border-radius: 30px;
+    padding: 50px 40px;
+    box-shadow: 0 30px 80px rgba(0, 0, 0, 0.4);
+    text-align: center;
+    min-width: 350px;
+    max-width: 500px;
+    color: white;
+    animation: victoryPop 0.5s cubic-bezier(0.68, -0.55, 0.265, 1.55);
+}
+
+.victory-icon {
+    font-size: 80px;
+    margin-bottom: 20px;
+    animation: bounce 1s ease-in-out infinite;
+}
+
+.victory-title {
+    font-size: 36px;
+    font-weight: 700;
+    margin: 0 0 15px 0;
+    text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.2);
+}
+
+.victory-message {
+    font-size: 24px;
+    font-weight: 600;
+    margin: 0 0 10px 0;
+    text-shadow: 1px 1px 3px rgba(0, 0, 0, 0.2);
+}
+
+.victory-subtitle {
+    font-size: 16px;
+    margin: 0 0 30px 0;
+    opacity: 0.95;
+}
+
+.victory-button {
+    font-size: 18px;
+    padding: 15px 40px;
+    background: white;
+    color: #ff6b6b;
+    border: none;
+    font-weight: 700;
+    box-shadow: 0 5px 15px rgba(0, 0, 0, 0.3);
+    transition: all 0.3s;
+}
+
+.victory-button:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 8px 20px rgba(0, 0, 0, 0.4);
+}
+
+@keyframes victoryPop {
+    0% {
+        transform: scale(0.3) rotate(-10deg);
+        opacity: 0;
+    }
+    50% {
+        transform: scale(1.1) rotate(5deg);
+    }
+    100% {
+        transform: scale(1) rotate(0deg);
+        opacity: 1;
+    }
+}
+
+@keyframes bounce {
+    0%, 100% {
+        transform: translateY(0);
+    }
+    50% {
+        transform: translateY(-15px);
+    }
+}
+
+@keyframes fadeIn {
+    from {
+        opacity: 0;
+    }
+    to {
+        opacity: 1;
+    }
+}
+
 .rest-timer {
     background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
     border-radius: 15px;
