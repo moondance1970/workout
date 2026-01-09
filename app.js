@@ -37,6 +37,7 @@ class WorkoutTracker {
         this.lastSavedExerciseState = null; // Track last saved state for auto-save detection
         this.dataLoaded = false; // Track if all data has been fully loaded
         this.selectingExercise = false; // Flag to prevent infinite loops in selectFirstExercise
+        this.completedPlanExercises = []; // Track which exercises have been completed in current plan session (don't modify plan permanently)
         this.init();
     }
 
@@ -2944,8 +2945,11 @@ class WorkoutTracker {
         
         if (this.activePlanId) {
             const plan = this.workoutPlans.find(p => p.id === this.activePlanId);
-            if (plan) {
-                const remainingExercises = plan.exerciseSlots ? plan.exerciseSlots.length : 0;
+            if (plan && plan.exerciseSlots) {
+                // Count remaining exercises (not completed in this session)
+                const remainingExercises = plan.exerciseSlots.filter(slot => 
+                    !this.completedPlanExercises.includes(slot.exerciseName)
+                ).length;
                 const planText = `${plan.name} (${remainingExercises} remaining)`;
                 
                 if (indicator) {
@@ -3630,55 +3634,49 @@ class WorkoutTracker {
             this.exerciseList.splice(exerciseIndex, 1);
         }
 
-        // If in plan mode, remove exercise from plan's exercise slots
+        // If in plan mode, track completed exercise (but don't modify plan permanently)
         if (this.activePlanId) {
             const plan = this.workoutPlans.find(p => p.id === this.activePlanId);
             if (plan && plan.exerciseSlots) {
-                const initialLength = plan.exerciseSlots.length;
-                plan.exerciseSlots = plan.exerciseSlots.filter(slot => slot.exerciseName !== exerciseName);
+                // Add to completed exercises list for this session only
+                if (!this.completedPlanExercises.includes(exerciseName)) {
+                    this.completedPlanExercises.push(exerciseName);
+                }
                 
-                // Renumber remaining slots to start from 1
-                plan.exerciseSlots.forEach((slot, index) => {
-                    slot.slotNumber = index + 1;
-                });
+                // Count remaining exercises (not completed in this session)
+                const remainingExercises = plan.exerciseSlots.filter(slot => 
+                    !this.completedPlanExercises.includes(slot.exerciseName)
+                );
                 
-                // If we removed a slot, save the updated plan
-                if (plan.exerciseSlots.length < initialLength) {
-                    await this.saveWorkoutPlans();
-                    
-                    // Check if all exercises are complete
-                    if (plan.exerciseSlots.length === 0) {
-                        // Clear the exercise dropdown to show empty state
-                        const exerciseSelect = document.getElementById('exercise-name');
-                        if (exerciseSelect) {
-                            exerciseSelect.innerHTML = '<option value="">Select or type to add new...</option>';
-                        }
-                        
-                        // Clear the form
-                        this.clearFormFields();
-                        
-                        // Show victory modal instead of updating indicator
-                        setTimeout(() => {
-                            this.showVictoryModal(plan.name);
-                        }, 500); // Small delay to ensure DOM is ready
-                        
-                        // Deactivate the plan
-                        this.activePlanId = null;
-                        this.currentPlanIndex = -1;
-                        localStorage.removeItem('currentPlanIndex');
-                        
-                        // Update the plan indicator to hide it
-                        this.updatePlanIndicator();
-                    } else {
-                        // Update the plan indicator to show remaining exercises
-                        this.updatePlanIndicator();
+                // Check if all exercises are complete
+                if (remainingExercises.length === 0) {
+                    // Clear the exercise dropdown to show empty state
+                    const exerciseSelect = document.getElementById('exercise-name');
+                    if (exerciseSelect) {
+                        exerciseSelect.innerHTML = '<option value="">Select or type to add new...</option>';
                     }
                     
-                    // Re-render plan mode tab if it's currently visible
-                    const planTab = document.getElementById('plan-tab');
-                    if (planTab && planTab.classList.contains('active')) {
-                        this.renderPlanModeTab();
-                    }
+                    // Clear the form
+                    this.clearFormFields();
+                    
+                    // Show victory modal instead of updating indicator
+                    setTimeout(() => {
+                        this.showVictoryModal(plan.name);
+                    }, 500); // Small delay to ensure DOM is ready
+                    
+                    // Deactivate the plan
+                    this.activePlanId = null;
+                    this.currentPlanIndex = -1;
+                    localStorage.removeItem('currentPlanIndex');
+                    
+                    // Clear completed exercises for next time
+                    this.completedPlanExercises = [];
+                    
+                    // Update the plan indicator to hide it
+                    this.updatePlanIndicator();
+                } else {
+                    // Update the plan indicator to show remaining exercises
+                    this.updatePlanIndicator();
                 }
             }
         }
