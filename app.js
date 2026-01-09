@@ -1981,32 +1981,213 @@ class WorkoutTracker {
         
         const exercise = normalizedList[index];
         
-        // Populate form with exercise data
-        const nameInput = document.getElementById('new-exercise-name');
-        const timerInput = document.getElementById('new-exercise-timer');
-        const youtubeInput = document.getElementById('new-exercise-youtube');
-        const aerobicCheckbox = document.getElementById('new-exercise-aerobic');
-        const addBtn = document.getElementById('add-exercise-config');
+        // Show modal dialog for editing
+        this.showEditExerciseModal(exercise, index);
+    }
+
+    showEditExerciseModal(exercise, index) {
+        // Create modal overlay
+        const modal = document.createElement('div');
+        modal.id = 'edit-exercise-modal';
+        modal.style.cssText = `
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.5);
+            z-index: 10000;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+        `;
         
-        if (!nameInput || !timerInput || !youtubeInput || !aerobicCheckbox || !addBtn) return;
+        // Calculate minutes and seconds from timer duration
+        const totalSeconds = exercise.timerDuration || this.defaultTimer;
+        const minutes = Math.floor(totalSeconds / 60);
+        const seconds = totalSeconds % 60;
         
-        nameInput.value = exercise.name;
-        timerInput.value = exercise.timerDuration ? this.formatRestTimer(exercise.timerDuration) : '';
-        youtubeInput.value = exercise.youtubeLink || '';
-        aerobicCheckbox.checked = exercise.isAerobic || false;
+        // Create dialog box
+        const dialog = document.createElement('div');
+        dialog.style.cssText = `
+            background: white;
+            border-radius: 8px;
+            padding: 24px;
+            max-width: 500px;
+            width: 90%;
+            max-height: 90vh;
+            overflow-y: auto;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+        `;
         
-        // Change button to "Update"
-        addBtn.textContent = 'Update Exercise';
-        addBtn.dataset.editIndex = index;
+        dialog.innerHTML = `
+            <h2 style="margin-top: 0; margin-bottom: 20px;">Edit Exercise</h2>
+            <div class="form-group" style="margin-bottom: 20px;">
+                <label for="edit-exercise-name" style="display: block; margin-bottom: 8px; font-weight: 600;">Exercise Name</label>
+                <input type="text" id="edit-exercise-name" value="${exercise.name}" style="width: 100%; padding: 10px; border: 2px solid #e0e0e0; border-radius: 5px; font-size: 16px;">
+            </div>
+            <div class="form-group" style="margin-bottom: 20px;">
+                <label style="display: block; margin-bottom: 8px; font-weight: 600;">Rest Timer Duration</label>
+                <div style="display: flex; align-items: center; gap: 15px; justify-content: center; margin: 15px 0;">
+                    <div style="display: flex; flex-direction: column; align-items: center; gap: 5px;">
+                        <label style="font-size: 12px; color: #666; margin-bottom: 5px;">Minutes</label>
+                        <div style="display: flex; align-items: center; gap: 5px;">
+                            <button type="button" id="edit-timer-dec-minutes" class="btn-secondary" style="width: 35px; height: 35px; padding: 0; font-size: 18px; border-radius: 5px;">−</button>
+                            <input type="number" id="edit-timer-minutes" min="0" max="59" value="${minutes}" style="width: 70px; text-align: center; padding: 8px; font-size: 18px; border: 2px solid #e0e0e0; border-radius: 5px;">
+                            <button type="button" id="edit-timer-inc-minutes" class="btn-secondary" style="width: 35px; height: 35px; padding: 0; font-size: 18px; border-radius: 5px;">+</button>
+                        </div>
+                    </div>
+                    <span style="font-size: 24px; font-weight: bold; color: #667eea; margin-top: 20px;">:</span>
+                    <div style="display: flex; flex-direction: column; align-items: center; gap: 5px;">
+                        <label style="font-size: 12px; color: #666; margin-bottom: 5px;">Seconds</label>
+                        <div style="display: flex; align-items: center; gap: 5px;">
+                            <button type="button" id="edit-timer-dec-seconds" class="btn-secondary" style="width: 35px; height: 35px; padding: 0; font-size: 18px; border-radius: 5px;">−</button>
+                            <input type="number" id="edit-timer-seconds" min="0" max="59" value="${seconds}" style="width: 70px; text-align: center; padding: 8px; font-size: 18px; border: 2px solid #e0e0e0; border-radius: 5px;">
+                            <button type="button" id="edit-timer-inc-seconds" class="btn-secondary" style="width: 35px; height: 35px; padding: 0; font-size: 18px; border-radius: 5px;">+</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="form-group" style="margin-bottom: 20px;">
+                <label for="edit-exercise-youtube" style="display: block; margin-bottom: 8px; font-weight: 600;">YouTube Link (optional)</label>
+                <input type="url" id="edit-exercise-youtube" value="${exercise.youtubeLink || ''}" placeholder="https://youtube.com/..." style="width: 100%; padding: 10px; border: 2px solid #e0e0e0; border-radius: 5px; font-size: 16px;">
+            </div>
+            <div class="form-group" style="margin-bottom: 20px;">
+                <label style="display: flex; align-items: center; gap: 10px;">
+                    <input type="checkbox" id="edit-exercise-aerobic" ${exercise.isAerobic ? 'checked' : ''} style="width: 20px; height: 20px;">
+                    <span style="font-weight: 600;">Is Aerobic Exercise</span>
+                </label>
+            </div>
+            <div style="display: flex; gap: 10px; justify-content: flex-end;">
+                <button id="edit-exercise-cancel-btn" class="btn-secondary" style="padding: 10px 20px;">Cancel</button>
+                <button id="edit-exercise-save-btn" class="btn-primary" style="padding: 10px 20px;">Save Changes</button>
+            </div>
+        `;
         
-        // Scroll to form
-        nameInput.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-        nameInput.focus();
+        modal.appendChild(dialog);
+        document.body.appendChild(modal);
         
-        // Update button handler temporarily
-        addBtn.onclick = () => {
-            this.updateExerciseConfiguration(index);
+        // Setup timer +/- buttons
+        const minutesInput = document.getElementById('edit-timer-minutes');
+        const secondsInput = document.getElementById('edit-timer-seconds');
+        
+        document.getElementById('edit-timer-dec-minutes').addEventListener('click', () => {
+            const current = parseInt(minutesInput.value) || 0;
+            if (current > 0) {
+                minutesInput.value = current - 1;
+            }
+        });
+        
+        document.getElementById('edit-timer-inc-minutes').addEventListener('click', () => {
+            const current = parseInt(minutesInput.value) || 0;
+            if (current < 59) {
+                minutesInput.value = current + 1;
+            }
+        });
+        
+        document.getElementById('edit-timer-dec-seconds').addEventListener('click', () => {
+            const current = parseInt(secondsInput.value) || 0;
+            if (current > 0) {
+                secondsInput.value = current - 1;
+            } else if (current === 0) {
+                const minutes = parseInt(minutesInput.value) || 0;
+                if (minutes > 0) {
+                    minutesInput.value = minutes - 1;
+                    secondsInput.value = 59;
+                }
+            }
+        });
+        
+        document.getElementById('edit-timer-inc-seconds').addEventListener('click', () => {
+            const current = parseInt(secondsInput.value) || 0;
+            if (current < 59) {
+                secondsInput.value = current + 1;
+            } else {
+                const minutes = parseInt(minutesInput.value) || 0;
+                if (minutes < 59) {
+                    minutesInput.value = minutes + 1;
+                    secondsInput.value = 0;
+                }
+            }
+        });
+        
+        // Handle Cancel button
+        document.getElementById('edit-exercise-cancel-btn').addEventListener('click', () => {
+            document.body.removeChild(modal);
+        });
+        
+        // Handle Save button
+        document.getElementById('edit-exercise-save-btn').addEventListener('click', () => {
+            this.updateExerciseConfigurationFromModal(index, modal);
+        });
+        
+        // Close on backdrop click
+        modal.addEventListener('click', (e) => {
+            if (e.target === modal) {
+                document.body.removeChild(modal);
+            }
+        });
+    }
+
+    updateExerciseConfigurationFromModal(index, modal) {
+        const normalizedList = this.normalizeExerciseList(this.exerciseList);
+        if (index < 0 || index >= normalizedList.length) return;
+        
+        const nameInput = document.getElementById('edit-exercise-name');
+        const minutesInput = document.getElementById('edit-timer-minutes');
+        const secondsInput = document.getElementById('edit-timer-seconds');
+        const youtubeInput = document.getElementById('edit-exercise-youtube');
+        const aerobicCheckbox = document.getElementById('edit-exercise-aerobic');
+        
+        if (!nameInput || !minutesInput || !secondsInput || !youtubeInput || !aerobicCheckbox) return;
+        
+        const name = nameInput.value.trim();
+        if (!name) {
+            alert('Please enter an exercise name');
+            return;
+        }
+        
+        const currentExercise = normalizedList[index];
+        const oldName = currentExercise.name;
+        
+        // If name changed, check if new name already exists
+        if (name !== oldName && this.exerciseListIncludes(name)) {
+            alert('Exercise already exists. Please edit the existing exercise instead.');
+            return;
+        }
+        
+        // Calculate timer duration from minutes and seconds
+        const minutes = parseInt(minutesInput.value) || 0;
+        const seconds = parseInt(secondsInput.value) || 0;
+        const timerDuration = (minutes * 60) + seconds;
+        
+        if (timerDuration === 0) {
+            alert('Timer duration cannot be zero. Please set at least 1 second.');
+            return;
+        }
+        
+        const youtubeLink = youtubeInput.value.trim();
+        const isAerobic = aerobicCheckbox.checked;
+        
+        // Update exercise in list
+        this.exerciseList[index] = {
+            name: name,
+            timerDuration: timerDuration,
+            youtubeLink: youtubeLink,
+            isAerobic: isAerobic
         };
+        
+        // Save to Google Sheets
+        this.saveExerciseList();
+        this.updateExerciseList();
+        
+        // Re-render list
+        this.renderExerciseConfigList();
+        
+        // Close modal
+        document.body.removeChild(modal);
+        
+        alert('Exercise updated successfully!');
     }
 
     updateExerciseConfiguration(index) {
