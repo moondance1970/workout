@@ -1523,7 +1523,7 @@ class WorkoutTracker {
         const timerDecSeconds = document.getElementById('timer-dec-seconds');
         const timerIncSeconds = document.getElementById('timer-inc-seconds');
         const timerMinutes = document.getElementById('timer-minutes');
-        const timerSeconds = document.getElementById('timer-seconds');
+        const timerSeconds = document.getElementById('default-timer-seconds');
         
         if (timerDecMinutes && timerMinutes) {
             timerDecMinutes.addEventListener('click', () => {
@@ -1589,6 +1589,53 @@ class WorkoutTracker {
             timerSeconds.addEventListener('change', () => this.updateTimerHiddenInput());
         }
         
+        // Re-setup handlers when config tab is rendered (in case elements weren't ready)
+        const configTab = document.querySelector('[data-tab="config"]');
+        if (configTab) {
+            configTab.addEventListener('click', () => {
+                // Re-attach handlers when tab is clicked (elements should be ready)
+                setTimeout(() => {
+                    const timerDecSecondsRetry = document.getElementById('timer-dec-seconds');
+                    const timerIncSecondsRetry = document.getElementById('timer-inc-seconds');
+                    const timerSecondsRetry = document.getElementById('default-timer-seconds');
+                    
+                    if (timerDecSecondsRetry && timerSecondsRetry && !timerDecSecondsRetry.dataset.listenerAttached) {
+                        timerDecSecondsRetry.addEventListener('click', () => {
+                            const current = parseInt(timerSecondsRetry.value) || 0;
+                            if (current > 0) {
+                                timerSecondsRetry.value = current - 1;
+                            } else if (current === 0) {
+                                const minutes = parseInt(document.getElementById('timer-minutes').value) || 0;
+                                if (minutes > 0) {
+                                    document.getElementById('timer-minutes').value = minutes - 1;
+                                    timerSecondsRetry.value = 59;
+                                }
+                            }
+                            this.updateTimerHiddenInput();
+                        });
+                        timerDecSecondsRetry.dataset.listenerAttached = 'true';
+                    }
+                    
+                    if (timerIncSecondsRetry && timerSecondsRetry && !timerIncSecondsRetry.dataset.listenerAttached) {
+                        timerIncSecondsRetry.addEventListener('click', () => {
+                            const current = parseInt(timerSecondsRetry.value) || 0;
+                            if (current < 59) {
+                                timerSecondsRetry.value = current + 1;
+                            } else {
+                                const minutes = parseInt(document.getElementById('timer-minutes').value) || 0;
+                                if (minutes < 59) {
+                                    document.getElementById('timer-minutes').value = minutes + 1;
+                                    timerSecondsRetry.value = 0;
+                                }
+                            }
+                            this.updateTimerHiddenInput();
+                        });
+                        timerIncSecondsRetry.dataset.listenerAttached = 'true';
+                    }
+                }, 100);
+            });
+        }
+        
         // Add exercise configuration button
         const addExerciseConfigBtn = document.getElementById('add-exercise-config');
         if (addExerciseConfigBtn) {
@@ -1598,7 +1645,7 @@ class WorkoutTracker {
 
     updateTimerHiddenInput() {
         const minutesInput = document.getElementById('timer-minutes');
-        const secondsInput = document.getElementById('timer-seconds');
+        const secondsInput = document.getElementById('default-timer-seconds');
         const hiddenInput = document.getElementById('default-timer');
         
         if (minutesInput && secondsInput && hiddenInput) {
@@ -1615,7 +1662,7 @@ class WorkoutTracker {
         
         // Set default timer inputs (minutes and seconds)
         const minutesInput = document.getElementById('timer-minutes');
-        const secondsInput = document.getElementById('timer-seconds');
+        const secondsInput = document.getElementById('default-timer-seconds');
         if (minutesInput && secondsInput) {
             const totalSeconds = this.defaultTimer;
             const minutes = Math.floor(totalSeconds / 60);
@@ -1691,7 +1738,7 @@ class WorkoutTracker {
     async saveDefaultTimer() {
         // Get values from minutes and seconds inputs
         const minutesInput = document.getElementById('timer-minutes');
-        const secondsInput = document.getElementById('timer-seconds');
+        const secondsInput = document.getElementById('default-timer-seconds');
         
         if (!minutesInput || !secondsInput) return;
         
