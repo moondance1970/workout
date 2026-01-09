@@ -2101,10 +2101,8 @@ class WorkoutTracker {
         const seconds = parseInt(secondsInput.value) || 0;
         const timerDuration = (minutes * 60) + seconds;
         
-        if (timerDuration === 0) {
-            alert('Timer duration cannot be zero. Please set at least 1 second.');
-            return;
-        }
+        // Allow 0:00 for exercises with no timer
+        // No validation needed - 0 is valid
         
         const youtubeLink = youtubeInput.value.trim();
         const isAerobic = aerobicCheckbox.checked;
@@ -2316,10 +2314,8 @@ class WorkoutTracker {
         const seconds = parseInt(secondsInput.value) || 0;
         const timerDuration = (minutes * 60) + seconds;
         
-        if (timerDuration === 0) {
-            alert('Timer duration cannot be zero. Please set at least 1 second.');
-            return;
-        }
+        // Allow 0:00 for exercises with no timer
+        // No validation needed - 0 is valid
         
         const youtubeLink = youtubeInput.value.trim();
         const isAerobic = aerobicCheckbox.checked;
@@ -4178,7 +4174,13 @@ class WorkoutTracker {
             const exercise = this.getExerciseByName(lastExerciseName);
             console.log('Found exercise config:', exercise);
             
-            if (exercise && exercise.timerDuration) {
+            if (exercise && exercise.timerDuration !== undefined && exercise.timerDuration !== null) {
+                // If timer is 0, skip the timer (no rest needed)
+                if (exercise.timerDuration === 0) {
+                    console.log('Exercise has no timer (0:00), skipping rest timer');
+                    this.selectFirstExercise(); // Move to next exercise immediately
+                    return;
+                }
                 timerDuration = exercise.timerDuration;
                 console.log('Using exercise-specific timer:', timerDuration, 'seconds');
             } else {
