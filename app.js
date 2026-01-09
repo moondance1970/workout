@@ -52,6 +52,62 @@ class WorkoutTracker {
         // Show sign-in button immediately if not signed in
         this.updateHeaderButtons();
         
+        // Check for OAuth redirect callback (for recording consent screen)
+        if (window.location.hash && sessionStorage.getItem('oauth_redirect') === 'true') {
+            const hashParams = new URLSearchParams(window.location.hash.substring(1));
+            const accessToken = hashParams.get('access_token');
+            const state = hashParams.get('state');
+            const storedState = sessionStorage.getItem('oauth_state');
+            
+            if (accessToken && state === storedState) {
+                // OAuth redirect successful
+                this.googleToken = accessToken;
+                const expiresIn = parseInt(hashParams.get('expires_in') || '3600', 10);
+                const expiry = new Date(Date.now() + (expiresIn - 120) * 1000);
+                localStorage.setItem('googleAccessToken', this.googleToken);
+                localStorage.setItem('googleTokenExpiry', expiry.toISOString());
+                this.isSignedIn = true;
+                
+                // Clear redirect flags
+                sessionStorage.removeItem('oauth_redirect');
+                sessionStorage.removeItem('oauth_state');
+                
+                // Clean URL
+                window.history.replaceState({}, document.title, window.location.pathname);
+                
+                // Load user info and continue
+                await this.loadUserInfo();
+                await this.initGoogleSheets();
+                this.updateHeaderButtons();
+                this.updateSyncStatus();
+                
+                // Reload sessions
+                this.sessions = await this.loadSessions();
+                this.currentSession = this.getTodaySession();
+                this.renderTodayWorkout();
+                this.renderHistory();
+                
+                // Load exercise list
+                const exercises = await this.loadExerciseList();
+                this.exerciseList = exercises;
+                this.updateExerciseList();
+                
+                // Continue with normal init flow
+                this.updateRepsInputs();
+                this.setupTabs();
+                this.updateSessionButton();
+                this.updatePlanIndicator();
+                this.updatePlanDropdown();
+                return;
+            } else if (hashParams.get('error')) {
+                // OAuth error
+                alert('Sign-in error: ' + hashParams.get('error'));
+                sessionStorage.removeItem('oauth_redirect');
+                sessionStorage.removeItem('oauth_state');
+                window.history.replaceState({}, document.title, window.location.pathname);
+            }
+        }
+        
         // Check for plan import from URL parameter
         const urlParams = new URLSearchParams(window.location.search);
         const planParam = urlParams.get('plan');
