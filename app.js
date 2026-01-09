@@ -316,61 +316,6 @@ class WorkoutTracker {
         tokenClient.requestAccessToken();
     }
 
-    async forceReAuthentication() {
-        // Get token before clearing (for revocation)
-        const existingToken = this.googleToken || localStorage.getItem('googleAccessToken');
-        
-        // Revoke access if we have a token
-        if (existingToken) {
-            try {
-                await fetch(`https://oauth2.googleapis.com/revoke?token=${existingToken}`, {
-                    method: 'POST',
-                    headers: {
-                        'Content-type': 'application/x-www-form-urlencoded',
-                    },
-                });
-            } catch (error) {
-                console.log('Error revoking token (may already be revoked):', error);
-            }
-        }
-        
-        // Clear stored tokens
-        localStorage.removeItem('googleAccessToken');
-        localStorage.removeItem('googleTokenExpiry');
-        this.googleToken = null;
-        this.isSignedIn = false;
-        
-        // Clear all user-specific data
-        if (this.userEmail) {
-            localStorage.removeItem(`staticSheetId_${this.userEmail}`);
-            localStorage.removeItem(`sessionsSheetId_${this.userEmail}`);
-            localStorage.removeItem(`sheetId_${this.userEmail}`);
-        }
-        localStorage.removeItem('sheetId');
-        localStorage.removeItem('userEmail');
-        
-        // Reset state
-        this.userEmail = null;
-        this.sheetId = null;
-        this.staticSheetId = null;
-        this.sessionsSheetId = null;
-        this.sessions = [];
-        this.currentSession = { date: new Date().toISOString().split('T')[0], exercises: [] };
-        this.exerciseList = [];
-        this.workoutPlans = [];
-        
-        // Update UI
-        this.updateHeaderButtons();
-        this.updateExerciseList(true);
-        this.renderTodayWorkout();
-        this.renderHistory();
-        this.updateSyncStatus();
-        
-        // Now request new token - this will show the consent screen
-        alert('Access cleared. Click "Sign in with Google" to see the consent screen again.');
-        await this.requestAccessToken();
-    }
-
     requestAccessTokenPromise() {
         return new Promise((resolve) => {
             // Prevent multiple simultaneous token requests
@@ -1159,17 +1104,9 @@ class WorkoutTracker {
                 sessionBtn.style.display = 'none';
             }
         } else {
-            // Hide login button, show session button and re-auth button
+            // Hide login button, show session button
             if (headerButtonContainer) {
                 headerButtonContainer.innerHTML = '';
-                // Add "Force Re-authentication" button for testing/recording
-                const reAuthBtn = document.createElement('button');
-                reAuthBtn.className = 'btn-secondary';
-                reAuthBtn.style.cssText = 'width: auto; padding: 8px 16px; margin-left: 10px; font-size: 12px;';
-                reAuthBtn.textContent = '🔄 Show Consent Screen';
-                reAuthBtn.title = 'Force Google OAuth consent screen to appear (for recording)';
-                reAuthBtn.onclick = () => this.forceReAuthentication();
-                headerButtonContainer.appendChild(reAuthBtn);
             }
             if (sessionBtn) {
                 sessionBtn.style.display = 'block';
