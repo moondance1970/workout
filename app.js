@@ -317,14 +317,10 @@ class WorkoutTracker {
     }
 
     async forceReAuthentication() {
-        // Clear stored tokens
-        localStorage.removeItem('googleAccessToken');
-        localStorage.removeItem('googleTokenExpiry');
-        this.googleToken = null;
-        this.isSignedIn = false;
+        // Get token before clearing (for revocation)
+        const existingToken = this.googleToken || localStorage.getItem('googleAccessToken');
         
         // Revoke access if we have a token
-        const existingToken = localStorage.getItem('googleAccessToken');
         if (existingToken) {
             try {
                 await fetch(`https://oauth2.googleapis.com/revoke?token=${existingToken}`, {
@@ -337,6 +333,12 @@ class WorkoutTracker {
                 console.log('Error revoking token (may already be revoked):', error);
             }
         }
+        
+        // Clear stored tokens
+        localStorage.removeItem('googleAccessToken');
+        localStorage.removeItem('googleTokenExpiry');
+        this.googleToken = null;
+        this.isSignedIn = false;
         
         // Clear all user-specific data
         if (this.userEmail) {
