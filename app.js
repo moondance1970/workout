@@ -1707,9 +1707,10 @@ class WorkoutTracker {
         this.restTimerDuration = totalSeconds; // Also update current rest timer duration
         
         // Update ALL exercises to use the new default timer value
-        const normalizedList = this.normalizeExerciseList(this.exerciseList);
+        // Normalize first to ensure we have objects
+        this.exerciseList = this.normalizeExerciseList(this.exerciseList);
         let updatedCount = 0;
-        normalizedList.forEach(exercise => {
+        this.exerciseList.forEach(exercise => {
             exercise.timerDuration = totalSeconds;
             updatedCount++;
         });
