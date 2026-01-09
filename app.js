@@ -6887,13 +6887,18 @@ class WorkoutTracker {
     }
 
     showVictoryModal(planName) {
+        console.log('showVictoryModal called with planName:', planName);
         const modal = document.getElementById('victory-modal');
         const planNameEl = document.getElementById('victory-plan-name');
         const closeBtn = document.getElementById('victory-close-btn');
         
+        console.log('Modal element:', modal);
+        console.log('Plan name element:', planNameEl);
+        
         if (modal && planNameEl) {
             planNameEl.textContent = planName;
             modal.style.display = 'flex';
+            console.log('Victory modal displayed');
             
             // Close modal when button is clicked
             if (closeBtn) {
@@ -6911,6 +6916,8 @@ class WorkoutTracker {
                     this.updatePlanIndicator(); // Update indicator to hide plan mode
                 };
             }
+        } else {
+            console.error('Victory modal elements not found!', { modal, planNameEl });
         }
     }
 
