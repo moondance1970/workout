@@ -4366,8 +4366,16 @@ class WorkoutTracker {
         
         this.restTimerSeconds = 0;
         
-        // Automatically select the next exercise (same as when timer completes)
-        this.selectFirstExercise();
+        // Only select next exercise if we're not in the middle of a change event
+        // This prevents infinite loops when selectFirstExercise triggers change events
+        if (!this.selectingExercise) {
+            this.selectingExercise = true;
+            this.selectFirstExercise();
+            // Reset flag after a short delay to allow change event to complete
+            setTimeout(() => {
+                this.selectingExercise = false;
+            }, 100);
+        }
     }
 
     updateTimerDisplay() {
@@ -4420,10 +4428,22 @@ class WorkoutTracker {
             // First option is empty, so select the second one (first actual exercise)
             const firstExercise = select.options[1];
             if (firstExercise && firstExercise.value) {
+                // Set value without triggering change event to avoid infinite loop
                 select.value = firstExercise.value;
-                // Trigger change event to show recommendations
-                const event = new Event('change', { bubbles: true });
-                select.dispatchEvent(event);
+                // Manually trigger the form population without the change event
+                const exerciseName = firstExercise.value;
+                const exercise = this.exerciseList.find(ex => {
+                    const name = typeof ex === 'object' ? ex.name : ex;
+                    return name === exerciseName;
+                });
+                
+                if (exercise) {
+                    // Get last performance for this exercise
+                    const lastExercise = this.getLastExercisePerformance(exerciseName);
+                    if (lastExercise) {
+                        this.populateFormFromLastExercise(lastExercise);
+                    }
+                }
             }
         }
     }
@@ -6904,36 +6924,68 @@ class WorkoutTracker {
 
     showVictoryModal(planName) {
         console.log('showVictoryModal called with planName:', planName);
-        const modal = document.getElementById('victory-modal');
-        const planNameEl = document.getElementById('victory-plan-name');
-        const closeBtn = document.getElementById('victory-close-btn');
         
-        console.log('Modal element:', modal);
-        console.log('Plan name element:', planNameEl);
+        // Try to find modal - wait a bit if DOM isn't ready
+        let modal = document.getElementById('victory-modal');
+        let planNameEl = document.getElementById('victory-plan-name');
+        let closeBtn = document.getElementById('victory-close-btn');
         
-        if (modal && planNameEl) {
-            planNameEl.textContent = planName;
-            modal.style.display = 'flex';
-            console.log('Victory modal displayed');
-            
-            // Close modal when button is clicked
-            if (closeBtn) {
-                closeBtn.onclick = () => {
-                    modal.style.display = 'none';
-                    this.updatePlanIndicator(); // Update indicator to hide plan mode
-                };
-            }
-            
-            // Also close on backdrop click
-            const backdrop = modal.querySelector('.victory-backdrop');
-            if (backdrop) {
-                backdrop.onclick = () => {
-                    modal.style.display = 'none';
-                    this.updatePlanIndicator(); // Update indicator to hide plan mode
-                };
-            }
-        } else {
-            console.error('Victory modal elements not found!', { modal, planNameEl });
+        // If not found, wait a bit and try again (DOM might not be ready)
+        if (!modal || !planNameEl) {
+            setTimeout(() => {
+                modal = document.getElementById('victory-modal');
+                planNameEl = document.getElementById('victory-plan-name');
+                closeBtn = document.getElementById('victory-close-btn');
+                
+                if (modal && planNameEl) {
+                    planNameEl.textContent = planName;
+                    modal.style.display = 'flex';
+                    
+                    // Close modal when button is clicked
+                    if (closeBtn) {
+                        closeBtn.onclick = () => {
+                            modal.style.display = 'none';
+                            this.updatePlanIndicator();
+                        };
+                    }
+                    
+                    // Also close on backdrop click
+                    const backdrop = modal.querySelector('.victory-backdrop');
+                    if (backdrop) {
+                        backdrop.onclick = () => {
+                            modal.style.display = 'none';
+                            this.updatePlanIndicator();
+                        };
+                    }
+                } else {
+                    console.error('Victory modal elements still not found after delay!', { modal, planNameEl });
+                    // Fallback: show alert if modal can't be found
+                    alert(`🎉 Plan Complete!\n\nYou've finished all exercises in "${planName}"!`);
+                }
+            }, 100);
+            return;
+        }
+        
+        // Modal found immediately
+        planNameEl.textContent = planName;
+        modal.style.display = 'flex';
+        console.log('Victory modal displayed');
+        
+        // Close modal when button is clicked
+        if (closeBtn) {
+            closeBtn.onclick = () => {
+                modal.style.display = 'none';
+                this.updatePlanIndicator();
+            };
+        }
+        
+        // Also close on backdrop click
+        const backdrop = modal.querySelector('.victory-backdrop');
+        if (backdrop) {
+            backdrop.onclick = () => {
+                modal.style.display = 'none';
+                this.updatePlanIndicator();
+            };
         }
     }
 
