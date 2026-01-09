@@ -4446,9 +4446,22 @@ class WorkoutTracker {
                 });
                 
                 if (exercise) {
-                    // Get last performance for this exercise
-                    const lastExercise = this.getLastExercisePerformance(exerciseName);
-                    if (lastExercise) {
+                    // Get last performance for this exercise from sessions
+                    const allExercises = [];
+                    this.sessions.forEach(session => {
+                        if (session.exercises) {
+                            session.exercises.forEach(ex => {
+                                if (ex.name.toLowerCase() === exerciseName.toLowerCase()) {
+                                    allExercises.push({ ...ex, date: session.date });
+                                }
+                            });
+                        }
+                    });
+                    
+                    if (allExercises.length > 0) {
+                        // Sort by date (most recent first)
+                        const sorted = allExercises.sort((a, b) => new Date(b.date) - new Date(a.date));
+                        const lastExercise = sorted[0];
                         this.populateFormFromLastExercise(lastExercise);
                     }
                 }
