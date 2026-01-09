@@ -7601,6 +7601,10 @@ class WorkoutTracker {
 
             // Mark session as inactive and update button
             this.sessionActive = false;
+            
+            // Clear completed plan exercises when session ends (plan can be reused)
+            this.completedPlanExercises = [];
+            
             sessionBtn.disabled = false;
             this.updateSessionButton();
             
