@@ -4416,7 +4416,14 @@ class WorkoutTracker {
         }
         
         // Automatically select the first exercise from remaining list
-        this.selectFirstExercise();
+        // Only if we're not in the middle of a change event (prevents infinite loop)
+        if (!this.selectingExercise) {
+            this.selectingExercise = true;
+            this.selectFirstExercise();
+            setTimeout(() => {
+                this.selectingExercise = false;
+            }, 100);
+        }
     }
 
     selectFirstExercise() {
