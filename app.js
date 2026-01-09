@@ -2890,6 +2890,9 @@ class WorkoutTracker {
     activatePlan(planId) {
         const planIndex = this.workoutPlans.findIndex(p => p.id === planId);
         if (planIndex >= 0) {
+            // Clear completed exercises when activating a plan (fresh start)
+            this.completedPlanExercises = [];
+            
             this.currentPlanIndex = planIndex;
             this.activePlanId = planId;
             localStorage.setItem('currentPlanIndex', planIndex.toString());
