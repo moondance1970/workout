@@ -316,6 +316,59 @@ class WorkoutTracker {
         tokenClient.requestAccessToken();
     }
 
+    async forceReAuthentication() {
+        // Clear stored tokens
+        localStorage.removeItem('googleAccessToken');
+        localStorage.removeItem('googleTokenExpiry');
+        this.googleToken = null;
+        this.isSignedIn = false;
+        
+        // Revoke access if we have a token
+        const existingToken = localStorage.getItem('googleAccessToken');
+        if (existingToken) {
+            try {
+                await fetch(`https://oauth2.googleapis.com/revoke?token=${existingToken}`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-type': 'application/x-www-form-urlencoded',
+                    },
+                });
+            } catch (error) {
+                console.log('Error revoking token (may already be revoked):', error);
+            }
+        }
+        
+        // Clear all user-specific data
+        if (this.userEmail) {
+            localStorage.removeItem(`staticSheetId_${this.userEmail}`);
+            localStorage.removeItem(`sessionsSheetId_${this.userEmail}`);
+            localStorage.removeItem(`sheetId_${this.userEmail}`);
+        }
+        localStorage.removeItem('sheetId');
+        localStorage.removeItem('userEmail');
+        
+        // Reset state
+        this.userEmail = null;
+        this.sheetId = null;
+        this.staticSheetId = null;
+        this.sessionsSheetId = null;
+        this.sessions = [];
+        this.currentSession = { date: new Date().toISOString().split('T')[0], exercises: [] };
+        this.exerciseList = [];
+        this.workoutPlans = [];
+        
+        // Update UI
+        this.updateHeaderButtons();
+        this.updateExerciseList(true);
+        this.renderTodayWorkout();
+        this.renderHistory();
+        this.updateSyncStatus();
+        
+        // Now request new token - this will show the consent screen
+        alert('Access cleared. Click "Sign in with Google" to see the consent screen again.');
+        await this.requestAccessToken();
+    }
+
     requestAccessTokenPromise() {
         return new Promise((resolve) => {
             // Prevent multiple simultaneous token requests
