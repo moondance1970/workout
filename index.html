@@ -138,9 +138,20 @@
             <div class="config-section">
                 <h3>Default Rest Timer</h3>
                 <div class="form-group">
-                    <label for="default-timer">Rest Timer Duration (M:S)</label>
-                    <input type="text" id="default-timer" placeholder="1:00" pattern="[0-9]+:[0-5][0-9]">
-                    <small class="help-text">Format: Minutes:Seconds (e.g., 1:30 for 1 minute 30 seconds)</small>
+                    <label for="default-timer">Rest Timer Duration</label>
+                    <div style="display: flex; align-items: center; gap: 10px; max-width: 300px;">
+                        <button type="button" id="timer-dec-minutes" class="btn-secondary" style="width: 40px; padding: 10px; font-size: 18px;">−</button>
+                        <input type="number" id="timer-minutes" min="0" max="59" value="1" style="width: 60px; text-align: center; padding: 10px; font-size: 16px;">
+                        <span style="font-size: 18px; font-weight: bold;">:</span>
+                        <input type="number" id="timer-seconds" min="0" max="59" value="0" style="width: 60px; text-align: center; padding: 10px; font-size: 16px;">
+                        <button type="button" id="timer-inc-minutes" class="btn-secondary" style="width: 40px; padding: 10px; font-size: 18px;">+</button>
+                    </div>
+                    <div style="display: flex; align-items: center; gap: 10px; max-width: 300px; margin-top: 10px;">
+                        <button type="button" id="timer-dec-seconds" class="btn-secondary" style="width: 40px; padding: 10px; font-size: 18px;">−</button>
+                        <span style="flex: 1; text-align: center; color: #666; font-size: 14px;">Minutes : Seconds</span>
+                        <button type="button" id="timer-inc-seconds" class="btn-secondary" style="width: 40px; padding: 10px; font-size: 18px;">+</button>
+                    </div>
+                    <input type="hidden" id="default-timer" value="1:00">
                 </div>
                 <button id="save-default-timer" class="btn-primary">Save Default Timer</button>
             </div>
