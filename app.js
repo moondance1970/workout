@@ -2058,8 +2058,8 @@ class WorkoutTracker {
         });
         
         // Handle Add button
-        document.getElementById('add-exercise-save-btn').addEventListener('click', () => {
-            this.saveExerciseFromModal(modal);
+        document.getElementById('add-exercise-save-btn').addEventListener('click', async () => {
+            await this.saveExerciseFromModal(modal);
         });
         
         // Close on backdrop click
@@ -2075,7 +2075,7 @@ class WorkoutTracker {
         }, 100);
     }
 
-    saveExerciseFromModal(modal) {
+    async saveExerciseFromModal(modal) {
         const nameInput = document.getElementById('add-exercise-name');
         const minutesInput = document.getElementById('add-timer-minutes');
         const secondsInput = document.getElementById('add-timer-seconds');
@@ -2117,8 +2117,8 @@ class WorkoutTracker {
             isAerobic: isAerobic
         });
         
-        // Save to Google Sheets
-        this.saveExerciseList();
+        // Save to Google Sheets immediately
+        await this.saveExerciseList();
         this.updateExerciseList();
         
         // Re-render list
@@ -2272,8 +2272,8 @@ class WorkoutTracker {
         });
         
         // Handle Save button
-        document.getElementById('edit-exercise-save-btn').addEventListener('click', () => {
-            this.updateExerciseConfigurationFromModal(index, modal);
+        document.getElementById('edit-exercise-save-btn').addEventListener('click', async () => {
+            await this.updateExerciseConfigurationFromModal(index, modal);
         });
         
         // Close on backdrop click
@@ -2284,7 +2284,7 @@ class WorkoutTracker {
         });
     }
 
-    updateExerciseConfigurationFromModal(index, modal) {
+    async updateExerciseConfigurationFromModal(index, modal) {
         const normalizedList = this.normalizeExerciseList(this.exerciseList);
         if (index < 0 || index >= normalizedList.length) return;
         
@@ -2332,8 +2332,8 @@ class WorkoutTracker {
             isAerobic: isAerobic
         };
         
-        // Save to Google Sheets
-        this.saveExerciseList();
+        // Save to Google Sheets immediately
+        await this.saveExerciseList();
         this.updateExerciseList();
         
         // Re-render list
