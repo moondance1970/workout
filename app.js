@@ -2926,10 +2926,10 @@ class WorkoutTracker {
             exerciseMap.set(name, ex);
         });
         
-        // Return exercises in the same order as plan.exerciseSlots
+        // Return exercises in the same order as plan.exerciseSlots, but only those NOT completed in this session
         const orderedExercises = [];
         plan.exerciseSlots.forEach(slot => {
-            if (slot.exerciseName) {
+            if (slot.exerciseName && !this.completedPlanExercises.includes(slot.exerciseName)) {
                 const exercise = exerciseMap.get(slot.exerciseName);
                 if (exercise) {
                     orderedExercises.push(exercise);
