@@ -1104,16 +1104,9 @@ class WorkoutTracker {
                 sessionBtn.style.display = 'none';
             }
         } else {
-            // Hide login button, show session button and re-auth button
+            // Hide login button, show session button
             if (headerButtonContainer) {
                 headerButtonContainer.innerHTML = '';
-                // Add "Force Re-authentication" button for testing/recording
-                const reAuthBtn = document.createElement('button');
-                reAuthBtn.className = 'btn-secondary';
-                reAuthBtn.style.cssText = 'width: auto; padding: 8px 16px; margin-left: 10px; font-size: 12px;';
-                reAuthBtn.textContent = '🔄 Show Consent Screen';
-                reAuthBtn.title = 'Force Google OAuth consent screen to appear (for recording)';
-                headerButtonContainer.appendChild(reAuthBtn);
             }
             if (sessionBtn) {
                 sessionBtn.style.display = 'block';
