@@ -1698,11 +1698,7 @@ class WorkoutTracker {
         const minutes = parseInt(minutesInput.value) || 0;
         const seconds = parseInt(secondsInput.value) || 0;
         
-        if (minutes === 0 && seconds === 0) {
-            alert('Timer duration cannot be zero. Please set at least 1 second.');
-            return;
-        }
-        
+        // Allow 0:00 for default timer (will be used as fallback if exercise has no timer)
         // Calculate total seconds
         const totalSeconds = (minutes * 60) + seconds;
         
