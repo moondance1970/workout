@@ -23,6 +23,7 @@ class WorkoutTracker {
         this.exerciseList = []; // Will be loaded asynchronously - array of objects: {name, timerDuration?, youtubeLink?, isAerobic}
         this.defaultTimer = 60; // Default rest timer in seconds (1 minute)
         this.userEmail = null; // Store user email for per-user sheet ID
+        this.userName = null; // Store user name for personalization
         this.sessionActive = false; // Track if a session is currently active
         this.restTimer = null; // Timer interval ID
         this.restTimerSeconds = 0; // Current timer seconds
@@ -460,13 +461,17 @@ class WorkoutTracker {
             if (response.ok) {
                 const data = await response.json();
                 if (data.name || data.email) {
-                    // User info display removed (settings tab removed)
-                    
                     // Store user email for sheet ID lookup
                     if (data.email) {
                         this.userEmail = data.email;
                         // Automatically load and connect to their sheet
                         await this.autoConnectSheet(data.email);
+                    }
+                    
+                    // Store user name for personalization
+                    if (data.name) {
+                        this.userName = data.name;
+                        this.updateWelcomeMessage();
                     }
                 }
             }
@@ -1132,6 +1137,16 @@ class WorkoutTracker {
             purposeSection.style.display = this.isSignedIn ? 'none' : 'block';
         }
         
+        // Update welcome message visibility
+        if (!this.isSignedIn) {
+            const welcomeMessage = document.getElementById('welcome-message');
+            if (welcomeMessage) {
+                welcomeMessage.style.display = 'none';
+            }
+        } else if (this.userName) {
+            this.updateWelcomeMessage();
+        }
+        
         const headerButtonContainer = document.getElementById('google-signin-button-header');
         const sessionBtn = document.getElementById('session-btn');
         
@@ -1215,6 +1230,7 @@ class WorkoutTracker {
         this.isSignedIn = false;
         this.sheetId = null;
         this.userEmail = null;
+        this.userName = null;
         localStorage.removeItem('googleAccessToken');
         localStorage.removeItem('googleTokenExpiry');
         localStorage.removeItem('sheetId');
