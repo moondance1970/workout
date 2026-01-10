@@ -41,6 +41,25 @@
             </div>
         </header>
 
+        <!-- App Purpose Section (visible when not signed in) -->
+        <div id="app-purpose-section" class="app-purpose-section" style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 30px; margin: 20px 0; border-radius: 10px; box-shadow: 0 4px 6px rgba(0,0,0,0.1);">
+            <h2 style="margin-top: 0; margin-bottom: 15px; font-size: 24px;">About Workout Tracker</h2>
+            <p style="font-size: 16px; line-height: 1.6; margin-bottom: 15px;">
+                <strong>Workout Tracker</strong> is a comprehensive fitness tracking application that helps you monitor your workout progress and achieve your fitness goals. This web application allows you to:
+            </p>
+            <ul style="font-size: 16px; line-height: 1.8; margin-left: 20px; margin-bottom: 15px;">
+                <li><strong>Track Workouts:</strong> Log your exercises, sets, reps, and weights for each workout session</li>
+                <li><strong>Create Workout Plans:</strong> Build custom workout plans with multiple exercises that you can follow during your training sessions</li>
+                <li><strong>Monitor Progress:</strong> View your workout history and visualize your progress over time with interactive graphs and charts</li>
+                <li><strong>Get Recommendations:</strong> Receive personalized recommendations based on your previous workout performance</li>
+                <li><strong>Rest Timer:</strong> Use the built-in rest timer to manage rest periods between sets</li>
+                <li><strong>Share Plans:</strong> Share your workout plans with friends and import plans shared by others</li>
+            </ul>
+            <p style="font-size: 16px; line-height: 1.6; margin-bottom: 0;">
+                <strong>How it works:</strong> Workout Tracker integrates with Google Sheets to securely store all your workout data in your own Google Drive. You maintain full control and ownership of your data. Simply sign in with your Google account to get started and begin tracking your fitness journey today!
+            </p>
+        </div>
+
         <!-- Track Workout Tab -->
         <div id="track-tab" class="tab-content active">
             <div id="plan-mode-indicator" class="plan-mode-indicator" style="display: none;">
@@ -218,6 +237,18 @@
         </p>
         <p style="color: #999; margin: 0;">© 2024 Workout Tracker</p>
     </footer>
+
+    <!-- Victory Modal -->
+    <div id="victory-modal" class="victory-modal" style="display: none;">
+        <div class="victory-backdrop"></div>
+        <div class="victory-content">
+            <div class="victory-icon">🏆</div>
+            <h2 class="victory-title">Plan Complete!</h2>
+            <p class="victory-message" id="victory-plan-name"></p>
+            <p class="victory-subtitle">You've completed all exercises in your workout plan!</p>
+            <button id="victory-close-btn" class="btn-primary victory-button">Awesome!</button>
+        </div>
+    </div>
 
     <script type="module" src="app.js"></script>
 </body>

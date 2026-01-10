@@ -1125,6 +1125,13 @@ class WorkoutTracker {
     }
 
     updateHeaderButtons() {
+        // Show/hide purpose section based on sign-in status
+        const purposeSection = document.getElementById('app-purpose-section');
+        if (purposeSection) {
+            // Hide purpose section when signed in (to avoid clutter), show when not signed in
+            purposeSection.style.display = this.isSignedIn ? 'none' : 'block';
+        }
+        
         const headerButtonContainer = document.getElementById('google-signin-button-header');
         const sessionBtn = document.getElementById('session-btn');
         
