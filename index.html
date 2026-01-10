@@ -59,10 +59,10 @@
                 Workout Tracker requests the following permissions from your Google account to provide its core functionality:
             </p>
             <ul style="font-size: 16px; line-height: 1.8; margin-left: 20px; margin-bottom: 15px;">
-                <li><strong>Google Sheets API (Full Access):</strong> We use this to create and manage Google Sheets in your Google Drive where all your workout data is stored. This includes your workout sessions, exercise configurations, and workout plans. All data is stored in sheets that you own and control in your own Google Drive.</li>
+                <li><strong>Google Sheets API (Full Access):</strong> We use this to create and manage Google Sheets in your Google Drive where all your workout data is stored. This includes your workout sessions, exercise configurations, and workout plans. All data is stored in sheets that you own and control in your own Google Drive. Data ownership is determined by Google Drive - whoever owns the sheet in Drive owns the data.</li>
                 <li><strong>Google Drive API (Files Created by App):</strong> We use this limited permission to create the Google Sheets files needed to store your workout data. We only access files that our application creates - we cannot access, view, or modify any other files in your Google Drive.</li>
-                <li><strong>User Email Address:</strong> We use your email address to uniquely identify your account and ensure your workout data is properly associated with your account when managing multiple users' data.</li>
-                <li><strong>User Profile Information:</strong> We use your basic profile information (name) to personalize your experience within the application.</li>
+                <li><strong>User Email Address:</strong> We use your email address as a local identifier in your browser's storage to map which Google Sheets belong to your account. This ensures that if multiple users sign in on the same browser, each user's data remains separate. Your email is also stored as metadata in workout plans to indicate who created them. However, the actual data ownership and access control is determined by Google Drive ownership, not by email.</li>
+                <li><strong>User Profile Information:</strong> We request your basic profile information (name and email) during the Google sign-in process, but we currently only use your email address as described above. Your name is not stored or displayed in the application.</li>
             </ul>
             
             <p style="font-size: 16px; line-height: 1.6; margin-bottom: 15px; background: rgba(255, 255, 255, 0.15); padding: 15px; border-radius: 8px;">
