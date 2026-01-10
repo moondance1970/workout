@@ -930,6 +930,35 @@ textarea:focus {
 }
 
 /* Footer Styles */
+.app-purpose-section {
+    margin: 20px;
+    padding: 25px;
+    border-radius: 10px;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+}
+
+.app-purpose-section h2 {
+    color: white;
+    margin-top: 0;
+    margin-bottom: 15px;
+    font-size: 24px;
+}
+
+.app-purpose-section p {
+    color: rgba(255, 255, 255, 0.95);
+    margin-bottom: 15px;
+}
+
+.app-purpose-section ul {
+    color: rgba(255, 255, 255, 0.95);
+    margin-left: 20px;
+    margin-bottom: 15px;
+}
+
+.app-purpose-section li {
+    margin-bottom: 8px;
+}
+
 footer {
     text-align: center;
     padding: 20px;
