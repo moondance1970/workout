@@ -479,6 +479,18 @@ class WorkoutTracker {
             console.error('Error loading user info:', error);
         }
     }
+    
+    updateWelcomeMessage() {
+        const welcomeMessage = document.getElementById('welcome-message');
+        const welcomeText = document.getElementById('welcome-text');
+        
+        if (welcomeMessage && welcomeText && this.userName) {
+            welcomeText.textContent = `Welcome, ${this.userName}! Did you do your preworkout stretches?`;
+            welcomeMessage.style.display = 'block';
+        } else if (welcomeMessage && !this.userName) {
+            welcomeMessage.style.display = 'none';
+        }
+    }
 
     async autoConnectSheet(userEmail) {
         // Check for both new sheet IDs first
