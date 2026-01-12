@@ -93,9 +93,9 @@
         <h2>Data Collection and Access</h2>
         <p>Workout Tracker accesses your Google account to provide the following services:</p>
         <ul>
-            <li><strong>Google Sheets Access:</strong> The app reads and writes data to your Google Sheets to store your workout sessions, exercise configurations, and workout plans.</li>
-            <li><strong>Google Drive Access (Read-Only):</strong> The app searches your Google Drive to find existing workout sheets you may have created, allowing you to connect to your existing data.</li>
+            <li><strong>Google Drive API (drive.file scope):</strong> The app uses the `drive.file` scope to create and manage Google Sheets files in your Google Drive. This scope only allows the app to access files that it creates - we cannot access, view, or modify any other files in your Google Drive. The app reads and writes data to these app-created sheets to store your workout sessions, exercise configurations, and workout plans.</li>
             <li><strong>Email Address:</strong> The app accesses your email address to identify your account and associate your workout data with your Google account. This allows the app to automatically connect to your workout sheet when you sign in.</li>
+            <li><strong>User Profile Information:</strong> The app accesses your basic profile information (name) to personalize your experience with a welcome message.</li>
         </ul>
         
         <h2>Data Storage</h2>
@@ -136,7 +136,7 @@
         </ul>
         
         <h2>Third-Party Services</h2>
-        <p>This app uses Google APIs (Google Sheets API and Google Drive API) to function. Your use of these services is subject to Google's Privacy Policy and Terms of Service.</p>
+        <p>This app uses Google APIs (Google Sheets API and Google Drive API with the `drive.file` scope) to function. Your use of these services is subject to Google's Privacy Policy and Terms of Service.</p>
         
         <h2>Children's Privacy</h2>
         <p>Our app is not intended for children under 13 years of age. We do not knowingly collect personal information from children under 13.</p>
