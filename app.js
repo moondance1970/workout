@@ -298,7 +298,7 @@ class WorkoutTracker {
 
         this.tokenRequestInProgress = true;
 
-        const scopes = 'https://www.googleapis.com/auth/spreadsheets https://www.googleapis.com/auth/drive.file https://www.googleapis.com/auth/userinfo.email https://www.googleapis.com/auth/userinfo.profile';
+        const scopes = 'https://www.googleapis.com/auth/drive.file https://www.googleapis.com/auth/userinfo.email https://www.googleapis.com/auth/userinfo.profile';
         
         // Use Google Identity Services token client
         const tokenClient = google.accounts.oauth2.initTokenClient({
@@ -397,7 +397,7 @@ class WorkoutTracker {
 
                 this.tokenRequestInProgress = true;
 
-                const scopes = 'https://www.googleapis.com/auth/spreadsheets https://www.googleapis.com/auth/drive.file https://www.googleapis.com/auth/userinfo.email https://www.googleapis.com/auth/userinfo.profile';
+                const scopes = 'https://www.googleapis.com/auth/drive.file https://www.googleapis.com/auth/userinfo.email https://www.googleapis.com/auth/userinfo.profile';
                 
                 // Use Google Identity Services token client
                 const tokenClient = google.accounts.oauth2.initTokenClient({
@@ -7592,6 +7592,13 @@ class WorkoutTracker {
 
             // Step 5: Mark session as active and update button
             this.sessionActive = true;
+            
+            // Hide welcome message when session starts
+            const welcomeMessage = document.getElementById('welcome-message');
+            if (welcomeMessage) {
+                welcomeMessage.style.display = 'none';
+            }
+            
             sessionBtn.disabled = false;
             this.updateSessionButton();
             
