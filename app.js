@@ -1142,10 +1142,10 @@ class WorkoutTracker {
     }
 
     updateHeaderButtons() {
-        // Always show purpose section (required for Google verification)
+        // Show purpose section only when not signed in (hide when connected)
         const purposeSection = document.getElementById('app-purpose-section');
         if (purposeSection) {
-            purposeSection.style.display = 'block';
+            purposeSection.style.display = this.isSignedIn ? 'none' : 'block';
         }
         
         // Update welcome message visibility
