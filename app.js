@@ -1145,14 +1145,15 @@ class WorkoutTracker {
     }
 
     updateHeaderButtons() {
-        // Show purpose section only when not signed in (hide when connected)
+        // Show purpose section only when not fully connected (hide when connected to sheet and data loaded)
         const purposeSection = document.getElementById('app-purpose-section');
         if (purposeSection) {
-            // Only hide if explicitly signed in (true), otherwise show it
-            if (this.isSignedIn === true) {
+            // Only hide when fully connected: signed in, has sheet ID, and data is loaded
+            const isFullyConnected = this.isSignedIn && this.sheetId && this.dataLoaded;
+            if (isFullyConnected) {
                 purposeSection.style.display = 'none';
             } else {
-                // Explicitly show it when not signed in
+                // Explicitly show it when not fully connected
                 purposeSection.style.display = 'block';
                 purposeSection.style.visibility = 'visible';
             }
