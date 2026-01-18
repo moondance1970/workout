@@ -45,21 +45,18 @@ class WorkoutTracker {
     async init() {
         this.setupEventListeners();
         
-        // Ensure purpose section is visible by default (will be hidden if signed in)
-        const purposeSection = document.getElementById('app-purpose-section');
-        if (purposeSection) {
-            purposeSection.style.display = 'block';
-        }
-        
         // Check if signed in before loading data
         const token = localStorage.getItem('googleAccessToken');
         const tokenExpiry = localStorage.getItem('googleTokenExpiry');
         if (token && tokenExpiry && new Date() < new Date(tokenExpiry)) {
             this.googleToken = token;
             this.isSignedIn = true;
+        } else {
+            // Explicitly set to false if no valid token
+            this.isSignedIn = false;
         }
         
-        // Show sign-in button immediately if not signed in
+        // Update UI based on sign-in status (this will show/hide purpose section)
         this.updateHeaderButtons();
         
         // Check for plan import from URL parameter
@@ -1155,7 +1152,9 @@ class WorkoutTracker {
             if (this.isSignedIn === true) {
                 purposeSection.style.display = 'none';
             } else {
+                // Explicitly show it when not signed in
                 purposeSection.style.display = 'block';
+                purposeSection.style.visibility = 'visible';
             }
         }
         
