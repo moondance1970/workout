@@ -1142,11 +1142,10 @@ class WorkoutTracker {
     }
 
     updateHeaderButtons() {
-        // Show/hide purpose section based on sign-in status
+        // Always show purpose section (required for Google verification)
         const purposeSection = document.getElementById('app-purpose-section');
         if (purposeSection) {
-            // Hide purpose section when signed in (to avoid clutter), show when not signed in
-            purposeSection.style.display = this.isSignedIn ? 'none' : 'block';
+            purposeSection.style.display = 'block';
         }
         
         // Update welcome message visibility
@@ -1569,6 +1568,9 @@ class WorkoutTracker {
                 } else if (tab === 'plan') {
                     // Render plan mode tab
                     this.renderPlanModeTab();
+                } else if (tab === 'followers') {
+                    // Render plan followers tab
+                    this.renderPlanFollowersView();
                 } else if (tab === 'track') {
                     // Update plan dropdown and session button when track tab is opened
                     this.updatePlanDropdown();
@@ -1706,6 +1708,194 @@ class WorkoutTracker {
         
         // Render exercise configuration list
         this.renderExerciseConfigList();
+        
+        // Render progress sharing management
+        this.renderProgressSharingList();
+    }
+
+    async renderProgressSharingList() {
+        const container = document.getElementById('progress-sharing-list');
+        if (!container) return;
+        
+        if (!this.isSignedIn) {
+            container.innerHTML = '<p class="no-data">Please sign in to manage progress sharing.</p>';
+            return;
+        }
+        
+        try {
+            const receivedPlans = await this.loadReceivedPlans();
+            const plansWithSharing = receivedPlans.filter(p => p.status === 'imported' && p.progressSharingEnabled);
+            
+            if (plansWithSharing.length === 0) {
+                container.innerHTML = '<p class="no-data">You are not sharing progress with any trainers.</p>';
+                return;
+            }
+            
+            let html = '<div style="display: flex; flex-direction: column; gap: 15px;">';
+            plansWithSharing.forEach(plan => {
+                html += `<div style="padding: 15px; background: #f9f9f9; border-radius: 4px; border-left: 4px solid #4CAF50;">
+                    <div style="display: flex; justify-content: space-between; align-items: center;">
+                        <div>
+                            <strong>${plan.planName}</strong>
+                            <div style="color: #666; font-size: 14px; margin-top: 5px;">Shared by: ${plan.senderEmail || 'Unknown'}</div>
+                            <div style="color: #999; font-size: 12px; margin-top: 5px;">✓ Progress sharing enabled</div>
+                        </div>
+                        <button class="btn-secondary toggle-progress-sharing-btn" 
+                                data-plan-id="${plan.planId}" 
+                                data-creator-sheet-id="${plan.creatorSheetId}"
+                                style="padding: 8px 16px; font-size: 14px;">
+                            Disable Sharing
+                        </button>
+                    </div>
+                </div>`;
+            });
+            html += '</div>';
+            
+            container.innerHTML = html;
+            
+            // Add event listeners
+            container.querySelectorAll('.toggle-progress-sharing-btn').forEach(btn => {
+                btn.addEventListener('click', async (e) => {
+                    const planId = e.target.dataset.planId;
+                    const creatorSheetId = e.target.dataset.creatorSheetId;
+                    await this.toggleProgressSharing(planId, creatorSheetId, false);
+                });
+            });
+        } catch (error) {
+            console.error('Error rendering progress sharing list:', error);
+            container.innerHTML = '<p class="no-data">Error loading progress sharing settings.</p>';
+        }
+    }
+
+    async toggleProgressSharing(planId, creatorSheetId, enable) {
+        try {
+            if (!enable) {
+                // Disable progress sharing - revoke access
+                await this.revokeProgressAccess(planId, creatorSheetId);
+                
+                // Update received plan info
+                const receivedPlans = await this.loadReceivedPlans();
+                const existingPlan = receivedPlans.find(p => 
+                    p.planId === planId && p.creatorSheetId === creatorSheetId
+                );
+                if (existingPlan) {
+                    existingPlan.progressSharingEnabled = false;
+                    // We need to update the saved plan info, but saveReceivedPlanInfo doesn't support progressSharingEnabled directly
+                    // So we'll update it manually
+                    const staticSheetId = this.getStaticSheetId();
+                    await gapi.client.sheets.spreadsheets.values.update({
+                        spreadsheetId: staticSheetId,
+                        range: 'Config!B1',
+                        valueInputOption: 'RAW',
+                        resource: { values: [[JSON.stringify(receivedPlans)]] }
+                    });
+                }
+                
+                alert('Progress sharing disabled. Your trainer can no longer view your workout progress.');
+            } else {
+                // Enable progress sharing
+                const plan = this.workoutPlans.find(p => p.id === planId || p.creatorSheetId === creatorSheetId);
+                if (!plan) {
+                    alert('Plan not found.');
+                    return;
+                }
+                
+                const creatorEmail = plan.createdBy || '';
+                if (!creatorEmail) {
+                    alert('Unable to identify plan creator.');
+                    return;
+                }
+                
+                const sessionsSheetId = this.getSessionsSheetId();
+                if (!sessionsSheetId) {
+                    alert('Sessions sheet not found.');
+                    return;
+                }
+                
+                await this.shareSheetForPlan(sessionsSheetId, creatorEmail);
+                await this.savePlanFollowerInfo(
+                    planId,
+                    creatorSheetId,
+                    this.userEmail || '',
+                    this.userName || '',
+                    this.getStaticSheetId(),
+                    sessionsSheetId,
+                    true
+                );
+                
+                alert('Progress sharing enabled! Your trainer can now view your workout progress.');
+            }
+            
+            // Refresh the progress sharing list
+            this.renderProgressSharingList();
+        } catch (error) {
+            console.error('Error toggling progress sharing:', error);
+            alert('Error updating progress sharing settings. Please try again.');
+        }
+    }
+
+    async revokeProgressAccess(planId, creatorSheetId) {
+        try {
+            // Get the follower info from creator's sheet to find the permission
+            const followers = await this.loadPlanFollowers(creatorSheetId);
+            const follower = followers.find(f => 
+                f.planId === planId && f.followerEmail === this.userEmail
+            );
+            
+            if (!follower || !follower.sessionsSheetId) {
+                console.warn('Follower info or sessions sheet ID not found');
+                return;
+            }
+            
+            await this.initGoogleDrive();
+            
+            if (!gapi.client || !gapi.client.drive) {
+                throw new Error('Google Drive API not initialized');
+            }
+            
+            gapi.client.setToken({ access_token: this.googleToken });
+            
+            // Get all permissions for the Sessions sheet
+            const permissionsResponse = await gapi.client.drive.permissions.list({
+                fileId: follower.sessionsSheetId,
+                fields: 'permissions(id,emailAddress,role)'
+            });
+            
+            const permissions = permissionsResponse.result.permissions || [];
+            // Get creator email from the plan
+            const plan = await this.fetchPlanFromCreator(planId, creatorSheetId);
+            const creatorEmail = plan?.createdBy || null;
+            
+            if (creatorEmail) {
+                // Find and delete the permission for the creator
+                const creatorPermission = permissions.find(p => 
+                    p.emailAddress && p.emailAddress.toLowerCase() === creatorEmail.toLowerCase() && p.role === 'reader'
+                );
+                
+                if (creatorPermission) {
+                    await gapi.client.drive.permissions.delete({
+                        fileId: follower.sessionsSheetId,
+                        permissionId: creatorPermission.id
+                    });
+                    console.log('Revoked progress access for creator');
+                }
+            }
+            
+            // Update follower info in creator's sheet
+            follower.progressSharingEnabled = false;
+            await this.savePlanFollowerInfo(
+                follower.planId,
+                creatorSheetId,
+                follower.followerEmail,
+                follower.followerName,
+                follower.followerSheetId,
+                follower.sessionsSheetId,
+                false
+            );
+        } catch (error) {
+            console.error('Error revoking progress access:', error);
+            throw error;
+        }
     }
 
     renderExerciseConfigList() {
@@ -1987,14 +2177,18 @@ class WorkoutTracker {
                 senderEmail: senderEmail || '',
                 creatorSheetId: creatorSheetId,
                 receivedAt: new Date().toISOString(),
-                status: status // "imported" or "rejected"
+                status: status, // "imported" or "rejected"
+                progressSharingEnabled: false // Will be updated when user enables it
             };
             
             if (existingIndex >= 0) {
-                // Update existing entry
+                // Update existing entry, preserve progressSharingEnabled if it exists
+                const existing = receivedPlans[existingIndex];
+                planInfo.progressSharingEnabled = existing.progressSharingEnabled || false;
                 receivedPlans[existingIndex] = planInfo;
             } else {
                 // Add new entry
+                planInfo.progressSharingEnabled = false;
                 receivedPlans.push(planInfo);
             }
             
@@ -2008,6 +2202,184 @@ class WorkoutTracker {
         } catch (error) {
             console.error('Error saving received plan info:', error);
             throw error;
+        }
+    }
+
+    async savePlanFollowerInfo(planId, creatorSheetId, followerEmail, followerName, followerSheetId, sessionsSheetId, progressSharingEnabled) {
+        if (!this.isSignedIn || !creatorSheetId) return;
+        
+        try {
+            await this.initGoogleSheets();
+            
+            // Ensure PlanFollowers sheet exists in creator's Config sheet
+            try {
+                const response = await gapi.client.sheets.spreadsheets.get({
+                    spreadsheetId: creatorSheetId
+                });
+                const sheets = response.result.sheets || [];
+                const planFollowersSheet = sheets.find(s => s.properties.title === 'PlanFollowers');
+                
+                if (!planFollowersSheet) {
+                    await gapi.client.sheets.spreadsheets.batchUpdate({
+                        spreadsheetId: creatorSheetId,
+                        resource: {
+                            requests: [{
+                                addSheet: {
+                                    properties: {
+                                        title: 'PlanFollowers',
+                                        gridProperties: {
+                                            rowCount: 1000,
+                                            columnCount: 8
+                                        }
+                                    }
+                                }
+                            }]
+                        }
+                    });
+                    
+                    // Add header row
+                    await gapi.client.sheets.spreadsheets.values.update({
+                        spreadsheetId: creatorSheetId,
+                        range: 'PlanFollowers!A1:H1',
+                        valueInputOption: 'RAW',
+                        resource: {
+                            values: [[
+                                'PlanId',
+                                'FollowerEmail',
+                                'FollowerName',
+                                'FollowerSheetId',
+                                'SessionsSheetId',
+                                'ProgressSharingEnabled',
+                                'SharedAt',
+                                'LastWorkoutDate'
+                            ]]
+                        }
+                    });
+                }
+            } catch (error) {
+                console.error('Error checking/creating PlanFollowers sheet:', error);
+                throw error;
+            }
+            
+            // Load existing followers
+            const followers = await this.loadPlanFollowers(creatorSheetId);
+            
+            // Check if follower already exists for this plan
+            const existingIndex = followers.findIndex(f => 
+                f.planId === planId && f.followerEmail === followerEmail
+            );
+            
+            const followerInfo = {
+                planId: planId,
+                followerEmail: followerEmail,
+                followerName: followerName || '',
+                followerSheetId: followerSheetId || '',
+                sessionsSheetId: sessionsSheetId || '',
+                progressSharingEnabled: progressSharingEnabled || false,
+                sharedAt: new Date().toISOString(),
+                lastWorkoutDate: ''
+            };
+            
+            if (existingIndex >= 0) {
+                // Update existing entry (preserve sharedAt, update other fields)
+                followerInfo.sharedAt = followers[existingIndex].sharedAt || followerInfo.sharedAt;
+                followers[existingIndex] = followerInfo;
+            } else {
+                // Add new entry
+                followers.push(followerInfo);
+            }
+            
+            // Save to PlanFollowers sheet
+            const rows = [['PlanId', 'FollowerEmail', 'FollowerName', 'FollowerSheetId', 'SessionsSheetId', 'ProgressSharingEnabled', 'SharedAt', 'LastWorkoutDate']];
+            followers.forEach(f => {
+                rows.push([
+                    f.planId || '',
+                    f.followerEmail || '',
+                    f.followerName || '',
+                    f.followerSheetId || '',
+                    f.sessionsSheetId || '',
+                    f.progressSharingEnabled ? 'true' : 'false',
+                    f.sharedAt || '',
+                    f.lastWorkoutDate || ''
+                ]);
+            });
+            
+            await gapi.client.sheets.spreadsheets.values.update({
+                spreadsheetId: creatorSheetId,
+                range: 'PlanFollowers!A1',
+                valueInputOption: 'RAW',
+                resource: { values: rows }
+            });
+            
+            console.log('Plan follower info saved successfully');
+        } catch (error) {
+            console.error('Error saving plan follower info:', error);
+            throw error;
+        }
+    }
+
+    async loadPlanFollowers(creatorSheetId = null) {
+        const sheetId = creatorSheetId || this.getStaticSheetId();
+        if (!this.isSignedIn || !sheetId) return [];
+        
+        try {
+            await this.initGoogleSheets();
+            
+            const response = await gapi.client.sheets.spreadsheets.values.get({
+                spreadsheetId: sheetId,
+                range: 'PlanFollowers!A2:H1000'
+            });
+            
+            const rows = response.result.values || [];
+            const followers = [];
+            
+            for (const row of rows) {
+                if (row[0] && row[1]) { // PlanId and FollowerEmail are required
+                    followers.push({
+                        planId: row[0].trim(),
+                        followerEmail: row[1].trim(),
+                        followerName: row[2]?.trim() || '',
+                        followerSheetId: row[3]?.trim() || '',
+                        sessionsSheetId: row[4]?.trim() || '',
+                        progressSharingEnabled: row[5]?.trim().toLowerCase() === 'true',
+                        sharedAt: row[6]?.trim() || '',
+                        lastWorkoutDate: row[7]?.trim() || ''
+                    });
+                }
+            }
+            
+            return followers;
+        } catch (error) {
+            // PlanFollowers sheet might not exist yet, that's okay
+            console.log('PlanFollowers sheet not found or error loading:', error.message);
+            return [];
+        }
+    }
+
+    async updateFollowerLastWorkout(planId, followerEmail, creatorSheetId = null) {
+        const sheetId = creatorSheetId || this.getStaticSheetId();
+        if (!this.isSignedIn || !sheetId) return;
+        
+        try {
+            const followers = await this.loadPlanFollowers(sheetId);
+            const follower = followers.find(f => 
+                f.planId === planId && f.followerEmail === followerEmail
+            );
+            
+            if (follower) {
+                follower.lastWorkoutDate = new Date().toISOString();
+                await this.savePlanFollowerInfo(
+                    follower.planId,
+                    sheetId,
+                    follower.followerEmail,
+                    follower.followerName,
+                    follower.followerSheetId,
+                    follower.sessionsSheetId,
+                    follower.progressSharingEnabled
+                );
+            }
+        } catch (error) {
+            console.error('Error updating follower last workout:', error);
         }
     }
 
@@ -2589,6 +2961,254 @@ class WorkoutTracker {
         }
     }
 
+    async renderPlanFollowersView() {
+        const container = document.getElementById('followers-list');
+        if (!container) return;
+        
+        if (!this.isSignedIn) {
+            container.innerHTML = '<p class="no-data">Please sign in to view your plan followers.</p>';
+            return;
+        }
+        
+        try {
+            // Load all followers for all plans
+            const followers = await this.loadPlanFollowers();
+            
+            if (followers.length === 0) {
+                container.innerHTML = '<p class="no-data">No one is using your shared plans yet. Share a plan to see followers here.</p>';
+                return;
+            }
+            
+            // Group followers by plan
+            const followersByPlan = {};
+            followers.forEach(follower => {
+                if (!followersByPlan[follower.planId]) {
+                    followersByPlan[follower.planId] = [];
+                }
+                followersByPlan[follower.planId].push(follower);
+            });
+            
+            // Get plan names
+            let html = '';
+            for (const [planId, planFollowers] of Object.entries(followersByPlan)) {
+                const plan = this.workoutPlans.find(p => p.id === planId);
+                const planName = plan ? plan.name : planId;
+                
+                html += `<div class="plan-followers-group" style="margin-bottom: 30px; padding: 20px; border: 1px solid #e0e0e0; border-radius: 8px;">`;
+                html += `<h4 style="margin-top: 0;">${planName}</h4>`;
+                html += `<p style="color: #666; margin-bottom: 15px;">${planFollowers.length} follower${planFollowers.length !== 1 ? 's' : ''}</p>`;
+                
+                planFollowers.forEach(follower => {
+                    const lastWorkout = follower.lastWorkoutDate 
+                        ? new Date(follower.lastWorkoutDate).toLocaleDateString()
+                        : 'Never';
+                    
+                    html += `<div class="follower-card" style="padding: 15px; margin-bottom: 10px; background: #f9f9f9; border-radius: 4px; border-left: 4px solid ${follower.progressSharingEnabled ? '#4CAF50' : '#ccc'};">
+                        <div style="display: flex; justify-content: space-between; align-items: center;">
+                            <div>
+                                <strong>${follower.followerName || follower.followerEmail}</strong>
+                                ${follower.followerName ? `<div style="color: #666; font-size: 14px;">${follower.followerEmail}</div>` : ''}
+                                <div style="color: #999; font-size: 12px; margin-top: 5px;">
+                                    Last workout: ${lastWorkout}
+                                    ${follower.progressSharingEnabled ? ' | ✓ Progress sharing enabled' : ' | Progress sharing disabled'}
+                                </div>
+                            </div>
+                            ${follower.progressSharingEnabled ? `
+                                <button class="btn-primary view-progress-btn" 
+                                        data-follower-email="${follower.followerEmail}" 
+                                        data-sessions-sheet-id="${follower.sessionsSheetId}"
+                                        style="padding: 8px 16px; font-size: 14px;">
+                                    View Progress
+                                </button>
+                            ` : ''}
+                        </div>
+                    </div>`;
+                });
+                
+                html += `</div>`;
+            }
+            
+            container.innerHTML = html;
+            
+            // Add event listeners for view progress buttons
+            container.querySelectorAll('.view-progress-btn').forEach(btn => {
+                btn.addEventListener('click', async (e) => {
+                    const followerEmail = e.target.dataset.followerEmail;
+                    const sessionsSheetId = e.target.dataset.sessionsSheetId;
+                    await this.viewFollowerProgress(followerEmail, sessionsSheetId);
+                });
+            });
+        } catch (error) {
+            console.error('Error rendering plan followers:', error);
+            container.innerHTML = '<p class="no-data">Error loading followers. Please try again.</p>';
+        }
+    }
+
+    async viewFollowerProgress(followerEmail, sessionsSheetId) {
+        if (!sessionsSheetId) {
+            alert('Sessions sheet ID not available for this follower.');
+            return;
+        }
+        
+        try {
+            // Load sessions from follower's Sessions sheet (read-only)
+            const sessions = await this.loadFollowerSessions(sessionsSheetId);
+            
+            // Create modal to display progress
+            const modal = document.createElement('div');
+            modal.style.cssText = `
+                position: fixed;
+                top: 0;
+                left: 0;
+                width: 100%;
+                height: 100%;
+                background: rgba(0, 0, 0, 0.5);
+                z-index: 10003;
+                display: flex;
+                justify-content: center;
+                align-items: center;
+            `;
+            
+            const dialog = document.createElement('div');
+            dialog.style.cssText = `
+                background: white;
+                border-radius: 8px;
+                padding: 24px;
+                max-width: 900px;
+                width: 90%;
+                max-height: 80vh;
+                overflow-y: auto;
+                box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+            `;
+            
+            // Calculate stats
+            const totalWorkouts = sessions.length;
+            const totalExercises = sessions.reduce((sum, s) => sum + (s.exercises?.length || 0), 0);
+            const lastWorkout = sessions.length > 0 ? new Date(sessions[0].date).toLocaleDateString() : 'Never';
+            
+            let sessionsHtml = '';
+            if (sessions.length === 0) {
+                sessionsHtml = '<p style="color: #999;">No workouts recorded yet.</p>';
+            } else {
+                sessionsHtml = '<div style="max-height: 400px; overflow-y: auto;">';
+                sessions.forEach(session => {
+                    sessionsHtml += `<div style="padding: 15px; margin-bottom: 10px; background: #f9f9f9; border-radius: 4px;">`;
+                    sessionsHtml += `<strong>${new Date(session.date).toLocaleDateString()}</strong>`;
+                    if (session.exercises && session.exercises.length > 0) {
+                        sessionsHtml += '<ul style="margin: 10px 0; padding-left: 20px;">';
+                        session.exercises.forEach(ex => {
+                            sessionsHtml += `<li>${ex.name}`;
+                            if (ex.sets && ex.sets.length > 0) {
+                                const setsInfo = ex.sets.map(s => 
+                                    `${s.reps || s.duration || ''}${s.weight ? ` @ ${s.weight}` : ''}`
+                                ).join(', ');
+                                sessionsHtml += ` - ${setsInfo}`;
+                            }
+                            sessionsHtml += `</li>`;
+                        });
+                        sessionsHtml += '</ul>';
+                    }
+                    sessionsHtml += `</div>`;
+                });
+                sessionsHtml += '</div>';
+            }
+            
+            dialog.innerHTML = `
+                <h2 style="margin-top: 0;">Progress: ${followerEmail}</h2>
+                <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 15px; margin-bottom: 20px;">
+                    <div style="padding: 15px; background: #f0f0f0; border-radius: 4px; text-align: center;">
+                        <div style="font-size: 24px; font-weight: bold; color: #667eea;">${totalWorkouts}</div>
+                        <div style="color: #666; font-size: 14px;">Total Workouts</div>
+                    </div>
+                    <div style="padding: 15px; background: #f0f0f0; border-radius: 4px; text-align: center;">
+                        <div style="font-size: 24px; font-weight: bold; color: #667eea;">${totalExercises}</div>
+                        <div style="color: #666; font-size: 14px;">Total Exercises</div>
+                    </div>
+                    <div style="padding: 15px; background: #f0f0f0; border-radius: 4px; text-align: center;">
+                        <div style="font-size: 24px; font-weight: bold; color: #667eea;">${lastWorkout}</div>
+                        <div style="color: #666; font-size: 14px;">Last Workout</div>
+                    </div>
+                </div>
+                <h3>Workout History</h3>
+                ${sessionsHtml}
+                <div style="display: flex; justify-content: flex-end; margin-top: 20px;">
+                    <button id="close-progress-btn" class="btn-primary" style="padding: 10px 20px;">Close</button>
+                </div>
+            `;
+            
+            modal.appendChild(dialog);
+            document.body.appendChild(modal);
+            
+            document.getElementById('close-progress-btn').addEventListener('click', () => {
+                document.body.removeChild(modal);
+            });
+        } catch (error) {
+            console.error('Error viewing follower progress:', error);
+            alert('Error loading follower progress. They may have revoked access or the sheet is no longer available.');
+        }
+    }
+
+    async loadFollowerSessions(sessionsSheetId) {
+        try {
+            await this.initGoogleSheets();
+            
+            if (gapi.client) {
+                gapi.client.setToken({ access_token: this.googleToken });
+            }
+            
+            // Read sessions from follower's Sessions sheet
+            const response = await gapi.client.sheets.spreadsheets.values.get({
+                spreadsheetId: sessionsSheetId,
+                range: 'Sessions!A2:Z1000'
+            });
+            
+            const rows = response.result.values || [];
+            const sessions = [];
+            
+            for (const row of rows) {
+                if (row[0]) { // Date is required
+                    const session = {
+                        date: row[0].trim(),
+                        exercises: []
+                    };
+                    
+                    // Parse exercises (columns B onwards contain exercise data)
+                    // Format: Exercise Name | Sets data (JSON) | ...
+                    for (let i = 1; i < row.length; i += 2) {
+                        if (row[i] && row[i].trim()) {
+                            const exerciseName = row[i].trim();
+                            let sets = [];
+                            
+                            if (row[i + 1]) {
+                                try {
+                                    sets = JSON.parse(row[i + 1]);
+                                } catch (e) {
+                                    // If not JSON, try to parse as simple format
+                                    console.warn('Error parsing sets for', exerciseName, e);
+                                }
+                            }
+                            
+                            session.exercises.push({
+                                name: exerciseName,
+                                sets: sets
+                            });
+                        }
+                    }
+                    
+                    sessions.push(session);
+                }
+            }
+            
+            // Sort by date (newest first)
+            sessions.sort((a, b) => new Date(b.date) - new Date(a.date));
+            
+            return sessions;
+        } catch (error) {
+            console.error('Error loading follower sessions:', error);
+            throw error;
+        }
+    }
+
     generatePlanSlots() {
         const slotsCount = parseInt(document.getElementById('plan-slots-count').value) || 5;
         if (slotsCount < 1 || slotsCount > 20) {
@@ -3010,6 +3630,217 @@ class WorkoutTracker {
         return `${baseUrl}?plan=${planId}&sheet=${creatorSheetId}`;
     }
 
+    isContactPickerAvailable() {
+        return 'contacts' in navigator && 'select' in navigator.contacts && typeof navigator.contacts.select === 'function';
+    }
+
+    async showContactPicker() {
+        if (!this.isContactPickerAvailable()) {
+            return null;
+        }
+        
+        try {
+            const contacts = await navigator.contacts.select(['name', 'email'], { multiple: true });
+            return contacts;
+        } catch (error) {
+            console.error('Error using Contact Picker API:', error);
+            return null;
+        }
+    }
+
+    shareViaWhatsApp(plan, planLink) {
+        const normalizedList = this.normalizeExerciseList(this.exerciseList);
+        
+        let message = `💪 Workout Plan: ${plan.name}\n\n`;
+        message += `Exercises:\n`;
+        
+        plan.exerciseSlots.forEach((slot, index) => {
+            const exercise = normalizedList.find(ex => ex.name === slot.exerciseName);
+            message += `${index + 1}. ${slot.exerciseName}\n`;
+            if (exercise) {
+                if (exercise.timerDuration) {
+                    message += `   - Rest Timer: ${this.formatRestTimer(exercise.timerDuration)}\n`;
+                }
+                if (exercise.youtubeLink) {
+                    message += `   - YouTube: ${exercise.youtubeLink}\n`;
+                }
+            }
+        });
+        
+        message += `\nClick this link to import the plan:\n${planLink}\n\n`;
+        message += `Note: Only the Config sheet is shared (read-only). Your personal workout data remains private.`;
+        
+        const encodedMessage = encodeURIComponent(message);
+        const whatsappUrl = `https://wa.me/?text=${encodedMessage}`;
+        
+        window.open(whatsappUrl, '_blank');
+    }
+
+    async showSharePlanDialog(plan, staticSheetId) {
+        return new Promise((resolve) => {
+            // Create modal overlay
+            const modal = document.createElement('div');
+            modal.style.cssText = `
+                position: fixed;
+                top: 0;
+                left: 0;
+                width: 100%;
+                height: 100%;
+                background: rgba(0, 0, 0, 0.5);
+                z-index: 10002;
+                display: flex;
+                justify-content: center;
+                align-items: center;
+            `;
+            
+            // Create dialog box
+            const dialog = document.createElement('div');
+            dialog.style.cssText = `
+                background: white;
+                border-radius: 8px;
+                padding: 24px;
+                max-width: 600px;
+                width: 90%;
+                max-height: 80vh;
+                overflow-y: auto;
+                box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+            `;
+            
+            const contactPickerAvailable = this.isContactPickerAvailable();
+            const planLink = this.generatePlanLink(plan.id, staticSheetId);
+            
+            dialog.innerHTML = `
+                <h2 style="margin-top: 0;">Share Workout Plan</h2>
+                <p style="color: #666; margin-bottom: 20px;">Share "${plan.name}" with others</p>
+                
+                <div style="margin-bottom: 20px;">
+                    <label for="share-email-input" style="display: block; margin-bottom: 8px; font-weight: 600;">Email Address (optional):</label>
+                    <input type="email" id="share-email-input" 
+                           placeholder="Enter email address or leave empty for public link" 
+                           autocomplete="email"
+                           style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 4px; font-size: 14px; box-sizing: border-box;">
+                    <p style="color: #999; font-size: 12px; margin-top: 5px;">Leave empty to share with anyone who has the link</p>
+                </div>
+                
+                <div style="display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 20px;">
+                    ${contactPickerAvailable ? `
+                        <button id="contact-picker-btn" class="btn-secondary" style="flex: 1; min-width: 150px; padding: 10px;">
+                            📱 Pick from Contacts
+                        </button>
+                    ` : ''}
+                    <button id="whatsapp-share-btn" class="btn-secondary" style="flex: 1; min-width: 150px; padding: 10px;">
+                        💬 Share via WhatsApp
+                    </button>
+                </div>
+                
+                <div style="display: flex; gap: 10px; justify-content: flex-end;">
+                    <button id="share-cancel-btn" class="btn-secondary" style="padding: 10px 20px;">Cancel</button>
+                    <button id="share-continue-btn" class="btn-primary" style="padding: 10px 20px;">Continue</button>
+                </div>
+            `;
+            
+            modal.appendChild(dialog);
+            document.body.appendChild(modal);
+            
+            const emailInput = document.getElementById('share-email-input');
+            let selectedEmails = [];
+            
+            // Handle Contact Picker button
+            if (contactPickerAvailable) {
+                document.getElementById('contact-picker-btn').addEventListener('click', async () => {
+                    const contacts = await this.showContactPicker();
+                    if (contacts && contacts.length > 0) {
+                        const emails = contacts
+                            .map(c => c.email && c.email.length > 0 ? c.email[0] : null)
+                            .filter(e => e !== null);
+                        if (emails.length > 0) {
+                            selectedEmails = emails;
+                            emailInput.value = emails.join(', ');
+                        }
+                    }
+                });
+            }
+            
+            // Handle WhatsApp share button
+            document.getElementById('whatsapp-share-btn').addEventListener('click', () => {
+                this.shareViaWhatsApp(plan, planLink);
+            });
+            
+            // Handle Cancel button
+            document.getElementById('share-cancel-btn').addEventListener('click', () => {
+                document.body.removeChild(modal);
+                resolve();
+            });
+            
+            // Handle Continue button
+            document.getElementById('share-continue-btn').addEventListener('click', async () => {
+                const recipientEmail = emailInput.value.trim();
+                
+                try {
+                    // Share the static sheet automatically
+                    await this.shareSheetForPlan(staticSheetId, recipientEmail || null);
+                } catch (error) {
+                    console.error('Error sharing sheet:', error);
+                    const continueAnyway = confirm('Failed to automatically share the sheet. You can manually share it in Google Sheets.\n\nDo you want to continue generating the plan link anyway?');
+                    if (!continueAnyway) {
+                        document.body.removeChild(modal);
+                        resolve();
+                        return;
+                    }
+                }
+                
+                // Generate share content
+                const normalizedList = this.normalizeExerciseList(this.exerciseList);
+                const planLink = this.generatePlanLink(plan.id, staticSheetId);
+                
+                let emailBody = `Subject: Workout Plan: ${plan.name}\n\n`;
+                emailBody += `Hi!\n\n`;
+                emailBody += `Here's a workout plan shared with you:\n\n`;
+                emailBody += `Plan: ${plan.name}\n\n`;
+                emailBody += `Exercises:\n`;
+                
+                plan.exerciseSlots.forEach((slot, index) => {
+                    const exercise = normalizedList.find(ex => ex.name === slot.exerciseName);
+                    emailBody += `${index + 1}. ${slot.exerciseName}\n`;
+                    if (exercise) {
+                        if (exercise.timerDuration) {
+                            emailBody += `   - Rest Timer: ${this.formatRestTimer(exercise.timerDuration)}\n`;
+                        }
+                        if (exercise.youtubeLink) {
+                            emailBody += `   - YouTube: ${exercise.youtubeLink}\n`;
+                        }
+                        emailBody += `   - Type: ${exercise.isAerobic ? 'Aerobic' : 'Strength'}\n`;
+                    }
+                    emailBody += `\n`;
+                });
+                
+                emailBody += `Click this link to import the plan into your workout tracker:\n`;
+                emailBody += `${planLink}\n\n`;
+                emailBody += `When you click the link, you'll be asked to sign in with Google. After signing in, a new workout sheet will be automatically created for you with this plan and all exercises configured (rest timers, YouTube links, etc.).\n\n`;
+                emailBody += `Note: Only the "Workout Tracker - Config" sheet is shared (Plans, Exercises, Config tabs). Your personal workout data remains completely private.\n\n`;
+                emailBody += `Happy training!`;
+                
+                document.body.removeChild(modal);
+                
+                // Try to copy to clipboard
+                if (navigator.clipboard && navigator.clipboard.writeText) {
+                    try {
+                        await navigator.clipboard.writeText(emailBody);
+                        alert('Plan details copied to clipboard! You can paste it into your email client.');
+                    } catch (e) {
+                        // Fallback to mailto
+                        window.location.href = `mailto:${recipientEmail ? recipientEmail : ''}?body=${encodeURIComponent(emailBody)}`;
+                    }
+                } else {
+                    // Fallback to mailto
+                    window.location.href = `mailto:${recipientEmail ? recipientEmail : ''}?body=${encodeURIComponent(emailBody)}`;
+                }
+                
+                resolve();
+            });
+        });
+    }
+
     async sharePlan(planId, creatorSheetId) {
         const plan = this.workoutPlans.find(p => p.id === planId);
         if (!plan) {
@@ -3038,64 +3869,8 @@ class WorkoutTracker {
             return;
         }
         
-        // Ask for recipient email (optional)
-        const recipientEmail = prompt('Enter recipient email address (optional - leave empty to share with anyone who has the link):');
-        
-        try {
-            // Share the static sheet automatically
-            await this.shareSheetForPlan(staticSheetId, recipientEmail);
-        } catch (error) {
-            console.error('Error sharing sheet:', error);
-            const continueAnyway = confirm('Failed to automatically share the sheet. You can manually share it in Google Sheets.\n\nDo you want to continue generating the plan link anyway?');
-            if (!continueAnyway) {
-                return;
-            }
-        }
-        
-        // Get exercise configurations for the plan
-        const planLink = this.generatePlanLink(planId, staticSheetId);
-        const normalizedList = this.normalizeExerciseList(this.exerciseList);
-        
-        let emailBody = `Subject: Workout Plan: ${plan.name}\n\n`;
-        emailBody += `Hi!\n\n`;
-        emailBody += `Here's a workout plan shared with you:\n\n`;
-        emailBody += `Plan: ${plan.name}\n\n`;
-        emailBody += `Exercises:\n`;
-        
-        plan.exerciseSlots.forEach((slot, index) => {
-            const exercise = normalizedList.find(ex => ex.name === slot.exerciseName);
-            emailBody += `${index + 1}. ${slot.exerciseName}\n`;
-            if (exercise) {
-                if (exercise.timerDuration) {
-                    emailBody += `   - Rest Timer: ${this.formatRestTimer(exercise.timerDuration)}\n`;
-                }
-                if (exercise.youtubeLink) {
-                    emailBody += `   - YouTube: ${exercise.youtubeLink}\n`;
-                }
-                emailBody += `   - Type: ${exercise.isAerobic ? 'Aerobic' : 'Strength'}\n`;
-            }
-            emailBody += `\n`;
-        });
-        
-        emailBody += `Click this link to import the plan into your workout tracker:\n`;
-        emailBody += `${planLink}\n\n`;
-        emailBody += `When you click the link, you'll be asked to sign in with Google. After signing in, a new workout sheet will be automatically created for you with this plan and all exercises configured (rest timers, YouTube links, etc.).\n\n`;
-        emailBody += `Note: Only the "Workout Tracker - Config" sheet is shared (Plans, Exercises, Config tabs). Your personal workout data remains completely private.\n\n`;
-        emailBody += `Happy training!`;
-        
-        // Try to copy to clipboard
-        if (navigator.clipboard && navigator.clipboard.writeText) {
-            try {
-                await navigator.clipboard.writeText(emailBody);
-                alert('Plan details copied to clipboard! You can paste it into your email client.');
-            } catch (e) {
-                // Fallback to mailto
-                window.location.href = `mailto:?body=${encodeURIComponent(emailBody)}`;
-            }
-        } else {
-            // Fallback to mailto
-            window.location.href = `mailto:?body=${encodeURIComponent(emailBody)}`;
-        }
+        // Show enhanced share dialog
+        await this.showSharePlanDialog(plan, staticSheetId);
     }
 
     async fetchPlanFromCreator(planId, creatorSheetId) {
@@ -3358,6 +4133,12 @@ class WorkoutTracker {
                     
                     document.body.removeChild(modal);
                     window.history.replaceState({}, document.title, window.location.pathname);
+                    
+                    // Show progress sharing prompt after successful import
+                    // Note: plan object may have been modified by doImportPlan, so we need to pass the original creator info
+                    const originalCreatorEmail = plan.createdBy || '';
+                    await this.showProgressSharingPrompt(plan, creatorSheetId, originalCreatorEmail);
+                    
                     alert('Plan imported successfully! Your sheet has been set up with all exercises configured.');
                     resolve();
                 } catch (error) {
@@ -3445,6 +4226,123 @@ class WorkoutTracker {
         
         // Activate the plan
         this.activatePlan(plan.id);
+    }
+
+    async showProgressSharingPrompt(plan, creatorSheetId, originalCreatorEmail = null) {
+        return new Promise((resolve) => {
+            // Create modal overlay
+            const modal = document.createElement('div');
+            modal.style.cssText = `
+                position: fixed;
+                top: 0;
+                left: 0;
+                width: 100%;
+                height: 100%;
+                background: rgba(0, 0, 0, 0.5);
+                z-index: 10001;
+                display: flex;
+                justify-content: center;
+                align-items: center;
+            `;
+            
+            // Create dialog box
+            const dialog = document.createElement('div');
+            dialog.style.cssText = `
+                background: white;
+                border-radius: 8px;
+                padding: 24px;
+                max-width: 500px;
+                width: 90%;
+                box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+            `;
+            
+            dialog.innerHTML = `
+                <h2 style="margin-top: 0;">Progress Sharing</h2>
+                <p style="color: #666; margin-bottom: 20px;">
+                    Would you like your trainer (the person who shared this plan) to be able to see your progress?
+                </p>
+                <p style="color: #999; font-size: 14px; margin-bottom: 20px;">
+                    If you accept, your trainer will have read-only access to your workout sessions. 
+                    They can see your exercises, sets, reps, and weights, but cannot modify your data.
+                </p>
+                <div style="display: flex; gap: 10px; justify-content: flex-end;">
+                    <button id="progress-no-btn" class="btn-secondary" style="padding: 10px 20px;">No, Keep Private</button>
+                    <button id="progress-yes-btn" class="btn-primary" style="padding: 10px 20px;">Yes, Share Progress</button>
+                </div>
+            `;
+            
+            modal.appendChild(dialog);
+            document.body.appendChild(modal);
+            
+            // Handle No button
+            document.getElementById('progress-no-btn').addEventListener('click', async () => {
+                document.body.removeChild(modal);
+                resolve();
+            });
+            
+            // Handle Yes button
+            document.getElementById('progress-yes-btn').addEventListener('click', async () => {
+                try {
+                    // Get creator's email - use originalCreatorEmail if provided, otherwise try plan.createdBy
+                    const creatorEmail = originalCreatorEmail || plan.createdBy || '';
+                    if (!creatorEmail) {
+                        alert('Unable to identify plan creator. Progress sharing cannot be enabled.');
+                        document.body.removeChild(modal);
+                        resolve();
+                        return;
+                    }
+                    
+                    // Get recipient's Sessions sheet ID
+                    const sessionsSheetId = this.getSessionsSheetId();
+                    if (!sessionsSheetId) {
+                        alert('Sessions sheet not found. Progress sharing cannot be enabled.');
+                        document.body.removeChild(modal);
+                        resolve();
+                        return;
+                    }
+                    
+                    // Share Sessions sheet with creator (read-only)
+                    await this.shareSheetForPlan(sessionsSheetId, creatorEmail);
+                    
+                    // Save follower info to creator's Config sheet
+                    await this.savePlanFollowerInfo(
+                        plan.id,
+                        creatorSheetId,
+                        this.userEmail || '',
+                        this.userName || '',
+                        this.getStaticSheetId(),
+                        sessionsSheetId,
+                        true // progressSharingEnabled
+                    );
+                    
+                    // Update received plan info to include progress sharing flag
+                    const receivedPlans = await this.loadReceivedPlans();
+                    const existingPlan = receivedPlans.find(p => 
+                        p.planId === plan.id && p.creatorSheetId === creatorSheetId
+                    );
+                    if (existingPlan) {
+                        existingPlan.progressSharingEnabled = true;
+                        // Save updated received plans with progressSharingEnabled flag
+                        const staticSheetId = this.getStaticSheetId();
+                        await gapi.client.sheets.spreadsheets.values.update({
+                            spreadsheetId: staticSheetId,
+                            range: 'Config!B1',
+                            valueInputOption: 'RAW',
+                            resource: { values: [[JSON.stringify(receivedPlans)]] }
+                        });
+                    }
+                    
+                    document.body.removeChild(modal);
+                    alert('Progress sharing enabled! Your trainer can now view your workout progress.');
+                    resolve();
+                } catch (error) {
+                    console.error('Error enabling progress sharing:', error);
+                    alert('Error enabling progress sharing. Please try again later.');
+                    document.body.removeChild(modal);
+                    resolve();
+                }
+            });
+        });
     }
 
     updateRepsInputs() {
@@ -6213,6 +7111,25 @@ class WorkoutTracker {
 
             // Also sync exercise list
             await this.syncExerciseListToSheet();
+            
+            // Update follower last workout date for all plans being followed
+            try {
+                const receivedPlans = await this.loadReceivedPlans();
+                const activePlans = receivedPlans.filter(p => 
+                    p.status === 'imported' && p.progressSharingEnabled
+                );
+                
+                for (const plan of activePlans) {
+                    await this.updateFollowerLastWorkout(
+                        plan.planId,
+                        this.userEmail || '',
+                        plan.creatorSheetId
+                    );
+                }
+            } catch (error) {
+                // Don't fail the sync if updating follower info fails
+                console.warn('Error updating follower last workout date:', error);
+            }
             
             if (!silent) {
                 alert('Data synced to Google Sheets successfully!');

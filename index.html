@@ -38,14 +38,18 @@
                 <button class="tab-btn" data-tab="history">History & Graphs</button>
                 <button class="tab-btn" data-tab="config">Configuration</button>
                 <button class="tab-btn" data-tab="plan">Plan Mode</button>
+                <button class="tab-btn" data-tab="followers">My Plan Followers</button>
             </div>
         </header>
 
-        <!-- App Purpose Section (visible when not signed in) -->
+        <!-- App Purpose Section (always visible) -->
         <div id="app-purpose-section" class="app-purpose-section" style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 30px; margin: 20px 0; border-radius: 10px; box-shadow: 0 4px 6px rgba(0,0,0,0.1);">
-            <h2 style="margin-top: 0; margin-bottom: 15px; font-size: 24px;">About Workout Tracker</h2>
+            <h2 style="margin-top: 0; margin-bottom: 20px; font-size: 28px; font-weight: 700;">Application Purpose</h2>
+            <p style="font-size: 20px; line-height: 1.8; margin-bottom: 25px; font-weight: 600; background: rgba(255, 255, 255, 0.2); padding: 20px; border-radius: 8px; border-left: 4px solid white;">
+                <strong>Workout Tracker</strong> is a web-based fitness tracking application that allows users to log, monitor, and analyze their workout sessions. This application enables users to record exercises, sets, reps, weights, and track their fitness progress over time. All workout data is stored in Google Sheets files that are automatically created in the user's own Google Drive, ensuring users maintain complete control and ownership of their fitness data.
+            </p>
             <p style="font-size: 16px; line-height: 1.6; margin-bottom: 15px;">
-                <strong>Workout Tracker</strong> is a comprehensive fitness tracking application that helps you monitor your workout progress and achieve your fitness goals. This web application allows you to:
+                <strong>Key Features:</strong> This web application provides the following functionality:
             </p>
             <ul style="font-size: 16px; line-height: 1.8; margin-left: 20px; margin-bottom: 15px;">
                 <li><strong>Track Workouts:</strong> Log your exercises, sets, reps, and weights for each workout session</li>
@@ -54,14 +58,14 @@
                 <li><strong>Get Recommendations:</strong> Receive personalized recommendations based on your previous workout performance</li>
                 <li><strong>Share Plans:</strong> Share your workout plans with friends and import plans shared by others</li>
             </ul>
-            <h3 style="font-size: 20px; margin-top: 25px; margin-bottom: 15px;">How We Use Google User Data</h3>
-            <p style="font-size: 16px; line-height: 1.6; margin-bottom: 15px;">
-                Workout Tracker requests the following permissions from your Google account to provide its core functionality:
+            <h3 style="font-size: 22px; margin-top: 30px; margin-bottom: 15px; font-weight: 600;">Why We Need Google User Data</h3>
+            <p style="font-size: 17px; line-height: 1.7; margin-bottom: 20px; font-weight: 500;">
+                <strong>Workout Tracker requires access to your Google account to provide its core functionality.</strong> Without Google Drive access, this application cannot function because all workout data must be stored in Google Sheets files. We request the following permissions and explain exactly why each is necessary:
             </p>
-            <ul style="font-size: 16px; line-height: 1.8; margin-left: 20px; margin-bottom: 15px;">
-                <li><strong>Google Drive API (Files Created by App):</strong> We use the `drive.file` scope to create and manage Google Sheets in your Google Drive where all your workout data is stored. This includes your workout sessions, exercise configurations, and workout plans. This scope only allows us to access files that our application creates - we cannot access, view, or modify any other files in your Google Drive. All data is stored in sheets that you own and control in your own Google Drive. Data ownership is determined by Google Drive - whoever owns the sheet in Drive owns the data.</li>
-                <li><strong>User Email Address:</strong> We use your email address as a local identifier in your browser's storage to map which Google Sheets belong to your account. This ensures that if multiple users sign in on the same browser, each user's data remains separate. Your email is also stored as metadata in workout plans to indicate who created them. However, the actual data ownership and access control is determined by Google Drive ownership, not by email.</li>
-                <li><strong>User Profile Information:</strong> We use your basic profile information (name) to personalize your experience. Your name is displayed in a welcome message when you sign in to provide a personalized greeting and encouragement for your workout.</li>
+            <ul style="font-size: 16px; line-height: 1.9; margin-left: 20px; margin-bottom: 20px;">
+                <li style="margin-bottom: 15px;"><strong>Google Drive API (drive.file scope):</strong> <strong>Why we need this:</strong> This application stores all workout data (exercises, sets, reps, weights, dates, workout plans) in Google Sheets files. We need Google Drive access to create these files in your Google Drive and to read/write your workout data. Without this permission, the application cannot save or retrieve any of your workout information. <strong>Important:</strong> We use the limited `drive.file` scope, which only allows us to access files that our application creates - we cannot access, view, or modify any other files in your Google Drive. All data is stored in sheets that you own and control in your own Google Drive.</li>
+                <li style="margin-bottom: 15px;"><strong>User Email Address:</strong> <strong>Why we need this:</strong> We use your email address to identify which Google Sheets belong to your account. This is essential because if multiple users sign in on the same browser, each user's data must remain separate. Your email is also stored as metadata in workout plans to indicate who created them. Without your email, we cannot properly associate your workout data with your account.</li>
+                <li style="margin-bottom: 15px;"><strong>User Profile Information (Name):</strong> <strong>Why we need this:</strong> We use your name to personalize your experience by displaying a welcome message when you sign in. This is optional but enhances the user experience. Without this, the app would still function but would not be able to provide personalized greetings.</li>
             </ul>
             
             <p style="font-size: 16px; line-height: 1.6; margin-bottom: 15px; background: rgba(255, 255, 255, 0.15); padding: 15px; border-radius: 8px;">
@@ -206,6 +210,12 @@
                     <button id="add-exercise-config" class="btn-primary">+ Add New Exercise</button>
                 </div>
             </div>
+
+            <div class="config-section">
+                <h3>Progress Sharing</h3>
+                <p style="color: #666; margin-bottom: 15px;">Manage which trainers can see your workout progress</p>
+                <div id="progress-sharing-list"></div>
+            </div>
         </div>
 
         <!-- Plan Mode Tab -->
@@ -240,6 +250,15 @@
                         <button id="cancel-plan-btn" class="btn-secondary" style="display: none; margin-left: 10px;">Cancel</button>
                     </div>
                 </div>
+            </div>
+        </div>
+
+        <!-- My Plan Followers Tab -->
+        <div id="followers-tab" class="tab-content">
+            <div class="config-section">
+                <h3>My Plan Followers</h3>
+                <p style="color: #666; margin-bottom: 20px;">View people who are using your shared workout plans</p>
+                <div id="followers-list"></div>
             </div>
         </div>
 
