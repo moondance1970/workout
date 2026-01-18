@@ -45,6 +45,12 @@ class WorkoutTracker {
     async init() {
         this.setupEventListeners();
         
+        // Ensure purpose section is visible by default (will be hidden if signed in)
+        const purposeSection = document.getElementById('app-purpose-section');
+        if (purposeSection) {
+            purposeSection.style.display = 'block';
+        }
+        
         // Check if signed in before loading data
         const token = localStorage.getItem('googleAccessToken');
         const tokenExpiry = localStorage.getItem('googleTokenExpiry');
@@ -1145,7 +1151,12 @@ class WorkoutTracker {
         // Show purpose section only when not signed in (hide when connected)
         const purposeSection = document.getElementById('app-purpose-section');
         if (purposeSection) {
-            purposeSection.style.display = this.isSignedIn ? 'none' : 'block';
+            // Only hide if explicitly signed in (true), otherwise show it
+            if (this.isSignedIn === true) {
+                purposeSection.style.display = 'none';
+            } else {
+                purposeSection.style.display = 'block';
+            }
         }
         
         // Update welcome message visibility
