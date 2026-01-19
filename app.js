@@ -39,6 +39,7 @@ class WorkoutTracker {
         this.dataLoaded = false; // Track if all data has been fully loaded
         this.selectingExercise = false; // Flag to prevent infinite loops in selectFirstExercise
         this.completedPlanExercises = []; // Track which exercises have been completed in current plan session (don't modify plan permanently)
+        this.manuallySelectedExercise = null; // Track manually selected exercise to preserve selection
         this.init();
     }
 
@@ -1459,6 +1460,9 @@ class WorkoutTracker {
         // Exercise name select change handler
         document.getElementById('exercise-name').addEventListener('change', async (e) => {
             const selectedExercise = e.target.value.trim();
+            
+            // Set flag to prevent updateExerciseList from resetting manual selection
+            this.manuallySelectedExercise = selectedExercise;
             
             // Check if there are unsaved changes to weight or reps before switching
             if (this.hasUnsavedWeightOrRepsChanges()) {
@@ -6457,7 +6461,12 @@ class WorkoutTracker {
             return;
         }
         
+        // Save current value before rebuilding dropdown
+        // Use selectedIndex to get the actual selected option, not just the value
         const currentValue = select.value;
+        const currentSelectedIndex = select.selectedIndex;
+        const currentSelectedOption = select.options[currentSelectedIndex];
+        const currentSelectedText = currentSelectedOption ? currentSelectedOption.text : currentValue;
         
         // Normalize exercise list to ensure it's an array of objects
         this.exerciseList = this.normalizeExerciseList(this.exerciseList);
@@ -6530,25 +6539,40 @@ class WorkoutTracker {
 
         // Restore previous selection if it still exists
         // Allow selection of any exercise from the plan, even if not in order
-        if (currentValue && this.exerciseListIncludes(currentValue)) {
-            // Check if current value is in filtered list
+        // Prioritize manually selected exercise if it was set
+        const valueToRestore = this.manuallySelectedExercise || currentValue;
+        if (valueToRestore && valueToRestore.trim() !== '') {
+            // First check if it's in the filtered list (normal case)
             const inFilteredList = exercisesToShow.some(ex => {
                 const name = typeof ex === 'object' ? ex.name : ex;
-                return name === currentValue;
+                return name === valueToRestore;
             });
+            
             if (inFilteredList) {
-                select.value = currentValue;
+                // Exercise is in filtered list, restore selection
+                select.value = valueToRestore;
+                // Clear manual selection flag after successful restore
+                this.manuallySelectedExercise = null;
             } else if (this.activePlanId) {
                 // If in plan mode and selection is not in filtered list, check if it's in the plan
-                // This allows selecting exercises out of order
+                // This allows selecting exercises out of order (but not completed ones)
                 const plan = this.workoutPlans.find(p => p.id === this.activePlanId);
                 if (plan && plan.exerciseSlots) {
-                    const isInPlan = plan.exerciseSlots.some(slot => slot.exerciseName === currentValue);
-                    if (isInPlan) {
-                        // Exercise is in plan, allow selection even if not in filtered order
-                        select.value = currentValue;
+                    const isInPlan = plan.exerciseSlots.some(slot => slot.exerciseName === valueToRestore);
+                    const isCompleted = this.completedPlanExercises.includes(valueToRestore);
+                    // Allow selection if exercise is in plan and not completed
+                    if (isInPlan && !isCompleted) {
+                        // Exercise is in plan and not completed, allow selection even if not in filtered order
+                        select.value = valueToRestore;
+                        // Clear manual selection flag after successful restore
+                        this.manuallySelectedExercise = null;
                     }
                 }
+            } else if (this.exerciseListIncludes(valueToRestore)) {
+                // Not in plan mode, but exercise exists in list, restore it
+                select.value = valueToRestore;
+                // Clear manual selection flag after successful restore
+                this.manuallySelectedExercise = null;
             }
         }
     }
