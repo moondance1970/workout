@@ -3595,12 +3595,10 @@ class WorkoutTracker {
             exerciseMap.set(name, ex);
         });
         
-        // Return exercises in the same order as plan.exerciseSlots
-        // Show all exercises from the plan, not just non-completed ones
-        // This allows users to select exercises out of order
+        // Return exercises in the same order as plan.exerciseSlots, but only those NOT completed in this session
         const orderedExercises = [];
         plan.exerciseSlots.forEach(slot => {
-            if (slot.exerciseName) {
+            if (slot.exerciseName && !this.completedPlanExercises.includes(slot.exerciseName)) {
                 const exercise = exerciseMap.get(slot.exerciseName);
                 if (exercise) {
                     orderedExercises.push(exercise);
