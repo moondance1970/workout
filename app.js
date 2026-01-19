@@ -40,6 +40,7 @@ class WorkoutTracker {
         this.selectingExercise = false; // Flag to prevent infinite loops in selectFirstExercise
         this.completedPlanExercises = []; // Track which exercises have been completed in current plan session (don't modify plan permanently)
         this.manuallySelectedExercise = null; // Track manually selected exercise to preserve selection
+        this.manuallySwitchingExercise = false; // Flag to prevent auto-starting timer when manually switching exercises
         this.init();
     }
 
@@ -1464,11 +1465,19 @@ class WorkoutTracker {
             // Set flag to prevent updateExerciseList from resetting manual selection
             this.manuallySelectedExercise = selectedExercise;
             
+            // Set flag to indicate this is a manual exercise switch (don't auto-start timer)
+            this.manuallySwitchingExercise = true;
+            
             // Check if there are unsaved changes to weight or reps before switching
             if (this.hasUnsavedWeightOrRepsChanges()) {
-                // Auto-save current exercise before switching
+                // Auto-save current exercise before switching (but don't start timer)
                 await this.saveExercise();
             }
+            
+            // Clear the manual switch flag after a delay
+            setTimeout(() => {
+                this.manuallySwitchingExercise = false;
+            }, 100);
             
             // Clear timer completely when a new exercise is selected
             if (selectedExercise && selectedExercise !== '') {
@@ -4672,18 +4681,28 @@ class WorkoutTracker {
         // Store state after saving
         this.storeCurrentExerciseState();
         
-        // Clear form (wrap in try-catch to prevent errors from stopping timer)
+        // Clear form (but preserve exercise selection if manually switching)
+        // Wrap in try-catch to prevent errors from stopping timer
         try {
-        this.clearForm();
+            if (this.manuallySwitchingExercise) {
+                // Don't clear exercise selection when manually switching - just clear reps/weights
+                this.clearFormFields();
+            } else {
+                // Normal save - clear everything including exercise selection
+                this.clearForm();
+            }
         } catch (error) {
             console.error('Error clearing form:', error);
         }
         
-        // Start rest timer after saving exercise (always try to start, even if form clearing failed)
-        try {
-        this.startRestTimer();
-        } catch (error) {
-            console.error('Error starting rest timer:', error);
+        // Start rest timer after saving exercise (but not if user is manually switching exercises)
+        // Only auto-start timer when user clicks "Save Exercise" button, not when switching
+        if (!this.manuallySwitchingExercise) {
+            try {
+                this.startRestTimer();
+            } catch (error) {
+                console.error('Error starting rest timer:', error);
+            }
         }
 
         // Immediately sync to Google Sheets (sheet is source of truth)
@@ -5240,7 +5259,7 @@ class WorkoutTracker {
                 // If timer is 0, skip the timer (no rest needed)
                 if (exercise.timerDuration === 0) {
                     console.log('Exercise has no timer (0:00), skipping rest timer');
-                    this.selectFirstExercise(); // Move to next exercise immediately
+                    // Don't auto-select next exercise - let user choose
                     return;
                 }
                 timerDuration = exercise.timerDuration;
@@ -5256,7 +5275,7 @@ class WorkoutTracker {
                     // If timer is 0, skip the timer (no rest needed)
                     if (foundExercise.timerDuration === 0) {
                         console.log('Exercise has no timer (0:00), skipping rest timer');
-                        this.selectFirstExercise(); // Move to next exercise immediately
+                        // Don't auto-select next exercise - let user choose
                         return;
                     }
                     timerDuration = foundExercise.timerDuration;
@@ -5346,16 +5365,9 @@ class WorkoutTracker {
         
         this.restTimerSeconds = 0;
         
-        // Only select next exercise if we're not in the middle of a change event
-        // This prevents infinite loops when selectFirstExercise triggers change events
-        if (!this.selectingExercise) {
-            this.selectingExercise = true;
-            this.selectFirstExercise();
-            // Reset flag after a short delay to allow change event to complete
-            setTimeout(() => {
-                this.selectingExercise = false;
-            }, 100);
-        }
+        // Don't auto-select next exercise - let user manually choose
+        // This gives user full control over exercise selection
+        // Removed auto-selection to allow selecting exercises out of order
     }
 
     updateTimerDisplay() {
@@ -5395,15 +5407,8 @@ class WorkoutTracker {
             skipBtn.style.display = 'none';
         }
         
-        // Automatically select the first exercise from remaining list
-        // Only if we're not in the middle of a change event (prevents infinite loop)
-        if (!this.selectingExercise) {
-            this.selectingExercise = true;
-            this.selectFirstExercise();
-            setTimeout(() => {
-                this.selectingExercise = false;
-            }, 100);
-        }
+        // Don't auto-select next exercise - let user manually choose
+        // This gives user full control over exercise selection
     }
 
     selectFirstExercise() {
