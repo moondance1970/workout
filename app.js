@@ -4361,13 +4361,33 @@ class WorkoutTracker {
 
     updateRepsInputs() {
         const container = document.getElementById('reps-container');
-        container.innerHTML = '';
         
-        // Check if selected exercise is aerobic
+        // Save current values before clearing (if not aerobic)
         const select = document.getElementById('exercise-name');
         const exerciseName = select ? select.value.trim() : '';
         const exercise = exerciseName ? this.getExerciseByName(exerciseName) : null;
         const isAerobic = exercise && exercise.isAerobic;
+        
+        let savedReps = [];
+        let savedWeights = [];
+        
+        if (!isAerobic) {
+            // Save current rep and weight values before clearing
+            const existingRepInputs = container.querySelectorAll('.rep-input');
+            const existingWeightInputs = container.querySelectorAll('.weight-input');
+            
+            existingRepInputs.forEach(input => {
+                const value = parseInt(input.value) || 0;
+                savedReps.push(value);
+            });
+            
+            existingWeightInputs.forEach(input => {
+                const value = parseFloat(input.value) || 0;
+                savedWeights.push(value);
+            });
+        }
+        
+        container.innerHTML = '';
         
         // Get the label element to update it
         const labelElement = container.parentElement.querySelector('label');
@@ -4406,18 +4426,26 @@ class WorkoutTracker {
                 setsInput.parentElement.style.display = 'block';
             }
         
-        for (let i = 1; i <= sets; i++) {
-            const group = document.createElement('div');
-            group.className = 'rep-input-group';
-            group.innerHTML = `
-                <label>Set ${i}:</label>
-                <div style="display: flex; gap: 10px; align-items: center;">
-                    <input type="number" class="rep-input" data-set="${i}" placeholder="Reps" min="0" value="0" style="width: 80px;">
-                    <span>×</span>
-                    <input type="number" class="weight-input" data-set="${i}" placeholder="Weight (kg)" min="0" step="0.5" value="0" style="width: 100px;">
-                </div>
-            `;
-            container.appendChild(group);
+            // Get the last set's values to use as default for new sets
+            const lastRep = savedReps.length > 0 ? savedReps[savedReps.length - 1] : 0;
+            const lastWeight = savedWeights.length > 0 ? savedWeights[savedWeights.length - 1] : 0;
+        
+            for (let i = 1; i <= sets; i++) {
+                // Use saved value if it exists, otherwise use last set's value (or 0 if no previous sets)
+                const repValue = i <= savedReps.length ? savedReps[i - 1] : lastRep;
+                const weightValue = i <= savedWeights.length ? savedWeights[i - 1] : lastWeight;
+                
+                const group = document.createElement('div');
+                group.className = 'rep-input-group';
+                group.innerHTML = `
+                    <label>Set ${i}:</label>
+                    <div style="display: flex; gap: 10px; align-items: center;">
+                        <input type="number" class="rep-input" data-set="${i}" placeholder="Reps" min="0" value="${repValue}" style="width: 80px;">
+                        <span>×</span>
+                        <input type="number" class="weight-input" data-set="${i}" placeholder="Weight (kg)" min="0" step="0.5" value="${weightValue}" style="width: 100px;">
+                    </div>
+                `;
+                container.appendChild(group);
             }
         }
     }
