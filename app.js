@@ -1494,16 +1494,19 @@ class WorkoutTracker {
                     newInput.value = '';
                 }
                 
+                // Clear form fields first when switching exercises (don't preserve old values)
+                this.clearFormFields();
+                
                 // Update reps/duration inputs based on exercise type
                 this.updateRepsInputs();
+                
+                // Show last time and recommendations for selected exercise (this will populate form with last exercise's values)
+                this.showExercisePreview(selectedExercise);
                 
                 // Store initial state after switching (use setTimeout to ensure inputs are rendered)
                 setTimeout(() => {
                     this.storeCurrentExerciseState();
                 }, 100);
-                
-                // Show last time and recommendations for selected exercise
-                this.showExercisePreview(selectedExercise);
             } else {
                 // Clear recommendations if no exercise selected
                 const container = document.getElementById('recommendations-content');
@@ -5365,7 +5368,7 @@ class WorkoutTracker {
         
         this.restTimerSeconds = 0;
         
-        // Auto-select next exercise after timer completes (only if not manually switching)
+        // Auto-select next exercise after skipping rest (only if not manually switching)
         // This helps with workflow when completing exercises in sequence
         if (!this.manuallySwitchingExercise && !this.selectingExercise) {
             this.selectingExercise = true;
