@@ -3595,10 +3595,12 @@ class WorkoutTracker {
             exerciseMap.set(name, ex);
         });
         
-        // Return exercises in the same order as plan.exerciseSlots, but only those NOT completed in this session
+        // Return exercises in the same order as plan.exerciseSlots
+        // Show all exercises from the plan, not just non-completed ones
+        // This allows users to select exercises out of order
         const orderedExercises = [];
         plan.exerciseSlots.forEach(slot => {
-            if (slot.exerciseName && !this.completedPlanExercises.includes(slot.exerciseName)) {
+            if (slot.exerciseName) {
                 const exercise = exerciseMap.get(slot.exerciseName);
                 if (exercise) {
                     orderedExercises.push(exercise);
@@ -6529,6 +6531,7 @@ class WorkoutTracker {
         console.log('updateExerciseList: Dropdown updated with', select.options.length, 'options');
 
         // Restore previous selection if it still exists
+        // Allow selection of any exercise from the plan, even if not in order
         if (currentValue && this.exerciseListIncludes(currentValue)) {
             // Check if current value is in filtered list
             const inFilteredList = exercisesToShow.some(ex => {
@@ -6536,7 +6539,18 @@ class WorkoutTracker {
                 return name === currentValue;
             });
             if (inFilteredList) {
-            select.value = currentValue;
+                select.value = currentValue;
+            } else if (this.activePlanId) {
+                // If in plan mode and selection is not in filtered list, check if it's in the plan
+                // This allows selecting exercises out of order
+                const plan = this.workoutPlans.find(p => p.id === this.activePlanId);
+                if (plan && plan.exerciseSlots) {
+                    const isInPlan = plan.exerciseSlots.some(slot => slot.exerciseName === currentValue);
+                    if (isInPlan) {
+                        // Exercise is in plan, allow selection even if not in filtered order
+                        select.value = currentValue;
+                    }
+                }
             }
         }
     }
