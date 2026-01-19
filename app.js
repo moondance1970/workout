@@ -5262,7 +5262,7 @@ class WorkoutTracker {
                 // If timer is 0, skip the timer (no rest needed)
                 if (exercise.timerDuration === 0) {
                     console.log('Exercise has no timer (0:00), skipping rest timer');
-                    // Don't auto-select next exercise - let user choose
+                    // Don't auto-select next exercise - let user choose manually
                     return;
                 }
                 timerDuration = exercise.timerDuration;
@@ -5278,7 +5278,7 @@ class WorkoutTracker {
                     // If timer is 0, skip the timer (no rest needed)
                     if (foundExercise.timerDuration === 0) {
                         console.log('Exercise has no timer (0:00), skipping rest timer');
-                        // Don't auto-select next exercise - let user choose
+                        // Don't auto-select next exercise - let user choose manually
                         return;
                     }
                     timerDuration = foundExercise.timerDuration;
@@ -5368,16 +5368,7 @@ class WorkoutTracker {
         
         this.restTimerSeconds = 0;
         
-        // Auto-select next exercise after skipping rest (only if not manually switching)
-        // This helps with workflow when completing exercises in sequence
-        if (!this.manuallySwitchingExercise && !this.selectingExercise) {
-            this.selectingExercise = true;
-            this.selectFirstExercise();
-            // Reset flag after a short delay to allow change event to complete
-            setTimeout(() => {
-                this.selectingExercise = false;
-            }, 100);
-        }
+        // Don't auto-select next exercise - let user manually choose
     }
 
     updateTimerDisplay() {
@@ -5417,15 +5408,7 @@ class WorkoutTracker {
             skipBtn.style.display = 'none';
         }
         
-        // Auto-select next exercise after rest completes (only if not manually switching)
-        // This helps with workflow when completing exercises in sequence
-        if (!this.manuallySwitchingExercise && !this.selectingExercise) {
-            this.selectingExercise = true;
-            this.selectFirstExercise();
-            setTimeout(() => {
-                this.selectingExercise = false;
-            }, 100);
-        }
+        // Don't auto-select next exercise - let user manually choose
     }
 
     selectFirstExercise() {
@@ -8604,8 +8587,7 @@ class WorkoutTracker {
             this.renderHistory();
             this.updateExerciseList();
 
-            // Automatically select the first exercise
-            this.selectFirstExercise();
+            // Don't auto-select exercise - let user choose manually
 
             // Step 5: Mark session as active and update button
             this.sessionActive = true;
