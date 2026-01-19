@@ -5365,9 +5365,16 @@ class WorkoutTracker {
         
         this.restTimerSeconds = 0;
         
-        // Don't auto-select next exercise - let user manually choose
-        // This gives user full control over exercise selection
-        // Removed auto-selection to allow selecting exercises out of order
+        // Auto-select next exercise after timer completes (only if not manually switching)
+        // This helps with workflow when completing exercises in sequence
+        if (!this.manuallySwitchingExercise && !this.selectingExercise) {
+            this.selectingExercise = true;
+            this.selectFirstExercise();
+            // Reset flag after a short delay to allow change event to complete
+            setTimeout(() => {
+                this.selectingExercise = false;
+            }, 100);
+        }
     }
 
     updateTimerDisplay() {
@@ -5407,8 +5414,15 @@ class WorkoutTracker {
             skipBtn.style.display = 'none';
         }
         
-        // Don't auto-select next exercise - let user manually choose
-        // This gives user full control over exercise selection
+        // Auto-select next exercise after rest completes (only if not manually switching)
+        // This helps with workflow when completing exercises in sequence
+        if (!this.manuallySwitchingExercise && !this.selectingExercise) {
+            this.selectingExercise = true;
+            this.selectFirstExercise();
+            setTimeout(() => {
+                this.selectingExercise = false;
+            }, 100);
+        }
     }
 
     selectFirstExercise() {
