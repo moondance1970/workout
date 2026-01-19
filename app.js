@@ -5408,6 +5408,14 @@ class WorkoutTracker {
             skipBtn.style.display = 'none';
         }
         
+        // Hide the timer modal after showing completion for a moment
+        setTimeout(() => {
+            const timerModal = document.getElementById('rest-timer-modal');
+            if (timerModal) {
+                timerModal.style.display = 'none';
+            }
+        }, 1500); // Show "Rest Completed" for 1.5 seconds, then hide
+        
         // Don't auto-select next exercise - let user manually choose
     }
 
