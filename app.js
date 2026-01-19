@@ -110,6 +110,7 @@ class WorkoutTracker {
             // All data loaded - mark as complete
             this.dataLoaded = true;
             this.updateSyncStatus();
+            this.updateHeaderButtons(); // Update header to hide purpose section when fully connected
         } else {
             // Keep empty until login
             this.sessions = [];
@@ -289,6 +290,7 @@ class WorkoutTracker {
             // All data loaded
             this.dataLoaded = true;
             this.updateSyncStatus();
+            this.updateHeaderButtons(); // Update header to hide purpose section when fully connected
             return;
         }
 
@@ -344,6 +346,7 @@ class WorkoutTracker {
                         // All data loaded
                         this.dataLoaded = true;
                         this.updateSyncStatus();
+                        this.updateHeaderButtons(); // Update header to hide purpose section when fully connected
                     });
                 } else if (tokenResponse.error) {
                     console.error('Sign-in error:', tokenResponse.error);
