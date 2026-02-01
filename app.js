@@ -41,102 +41,78 @@ class WorkoutTracker {
         this.completedPlanExercises = []; // Track which exercises have been completed in current plan session (don't modify plan permanently)
         this.manuallySelectedExercise = null; // Track manually selected exercise to preserve selection
         this.manuallySwitchingExercise = false; // Flag to prevent auto-starting timer when manually switching exercises
+        
+        // Initialize cache and auth managers
+        this.cacheManager = new CacheManager();
+        this.authManager = new AuthManager();
+        
         this.init();
     }
 
     async init() {
         this.setupEventListeners();
         
-        // Check if signed in before loading data
-        const token = localStorage.getItem('googleAccessToken');
-        const tokenExpiry = localStorage.getItem('googleTokenExpiry');
-        if (token && tokenExpiry && new Date() < new Date(tokenExpiry)) {
-            this.googleToken = token;
-            this.isSignedIn = true;
-        } else {
-            // Explicitly set to false if no valid token
-            this.isSignedIn = false;
-        }
+        // Initialize background authentication first
+        const isAuthenticated = await this.authManager.initializeBackgroundAuth();
         
-        // Update UI based on sign-in status (this will show/hide purpose section)
-        this.updateHeaderButtons();
+        if (isAuthenticated) {
+            this.isSignedIn = true;
+            this.dataLoaded = false;
+            this.updateSyncStatus();
+            
+            // Load data from cache first for immediate UI response
+            await this.loadDataFromCache();
+            
+            // Update UI immediately with cached data
+            this.updateHeaderButtons();
+            this.renderTodayWorkout();
+            this.renderHistory();
+            this.updateExerciseList(true);
+            this.updatePlanDropdown();
+            
+            // Mark as loaded with cached data
+            this.dataLoaded = true;
+            this.updateSyncStatus();
+            
+            // Start background sync to refresh from server
+            this.cacheManager.backgroundSync();
+        } else {
+            // Not authenticated - show login UI
+            this.isSignedIn = false;
+            this.updateHeaderButtons();
+        }
         
         // Check for plan import from URL parameter
         const urlParams = new URLSearchParams(window.location.search);
         const planParam = urlParams.get('plan');
         const creatorSheetId = urlParams.get('sheet');
         
-        // Only load data if signed in - keep empty until login
-        if (this.isSignedIn) {
-            // Reset data loaded flag
-            this.dataLoaded = false;
-            this.updateSyncStatus();
-            
-            // Load user info and auto-connect to sheet if already signed in
-            await this.loadUserInfo();
-            
-            // Load default timer first
-            await this.loadDefaultTimer();
-            
-            // Load sessions (will try Google Sheets first if signed in)
-            this.sessions = await this.loadSessions();
-            this.currentSession = this.getTodaySession();
-            
-            // Load exercise list (will try Google Sheets if signed in)
-            this.exerciseList = await this.loadExerciseList();
-            this.updateExerciseList(true); // Skip save during initial load - just reading
-            
-            // Load workout plans
-            this.workoutPlans = await this.loadWorkoutPlans();
-            
-            // Check if plan import is requested
-            if (planParam && creatorSheetId) {
-                await this.importPlanFromLink(planParam, creatorSheetId);
-            } else if (planParam) {
-                // Plan ID only - try to find in own plans
-                const plan = this.workoutPlans.find(p => p.id === planParam);
-                if (plan) {
-                    this.activatePlan(plan.id);
-                }
+        if (planParam && creatorSheetId && this.isSignedIn) {
+            await this.importPlanFromLink(planParam, creatorSheetId);
+        } else if (planParam && this.isSignedIn) {
+            // Plan ID only - try to find in own plans
+            const plan = this.workoutPlans.find(p => p.id === planParam);
+            if (plan) {
+                this.activatePlan(plan.id);
             }
-            
-            // Load current plan index from localStorage
-            const savedPlanIndex = localStorage.getItem('currentPlanIndex');
-            if (savedPlanIndex !== null && this.workoutPlans.length > 0) {
-                this.currentPlanIndex = parseInt(savedPlanIndex, 10);
-                if (this.currentPlanIndex >= 0 && this.currentPlanIndex < this.workoutPlans.length) {
-                    this.activePlanId = this.workoutPlans[this.currentPlanIndex].id;
-                }
-            }
-            
-            // All data loaded - mark as complete
-            this.dataLoaded = true;
-            this.updateSyncStatus();
-            this.updateHeaderButtons(); // Update header to hide purpose section when fully connected
-        } else {
-            // Keep empty until login
-            this.sessions = [];
-            this.currentSession = { date: new Date().toISOString().split('T')[0], exercises: [] };
-            this.exerciseList = [];
-            this.workoutPlans = [];
-            this.updateExerciseList(true); // Skip save - no data to save
-            
-            // If plan parameter exists but not signed in, show message
-            if (planParam) {
-                alert('Please sign in with Google to import this workout plan. After signing in, a new workout sheet will be automatically created for you.');
+        } else if (planParam && !this.isSignedIn) {
+            // Show message to sign in first
+            alert('Please sign in with Google to import this workout plan. After signing in, a new workout sheet will be automatically created for you.');
+        }
+        
+        // Load current plan index from localStorage
+        const savedPlanIndex = localStorage.getItem('currentPlanIndex');
+        if (savedPlanIndex !== null && this.workoutPlans.length > 0) {
+            this.currentPlanIndex = parseInt(savedPlanIndex, 10);
+            if (this.currentPlanIndex >= 0 && this.currentPlanIndex < this.workoutPlans.length) {
+                this.activePlanId = this.workoutPlans[this.currentPlanIndex].id;
             }
         }
         
         this.updateRepsInputs();
-        this.renderTodayWorkout();
-        this.renderHistory();
         this.setupTabs(); // Setup tabs first so they work immediately
-        this.updateSyncStatus();
         this.updateSessionButton(); // Initialize session button state
         this.updatePlanIndicator(); // Update plan indicator in main screen
-        this.updatePlanDropdown(); // Update plan dropdown
-        
-        // Settings removed - all data is cloud-based
         
         // Initialize Google Auth after a delay to ensure scripts are loaded
         setTimeout(() => this.initGoogleAuth(), 100);
@@ -464,11 +440,46 @@ class WorkoutTracker {
 
     async loadUserInfo() {
         if (!this.googleToken) return;
+        
+        // Try cache first
+        const cachedUserInfo = this.cacheManager.getCachedData('userInfo');
+        if (cachedUserInfo) {
+            this.userEmail = cachedUserInfo.email;
+            this.userName = cachedUserInfo.name;
+            this.updateWelcomeMessage();
+            
+            // Still refresh in background
+            this.fetchUserInfoFromAPI().then(freshData => {
+                if (freshData) {
+                    this.cacheManager.setCachedData('userInfo', freshData);
+                    if (freshData.email !== this.userEmail || freshData.name !== this.userName) {
+                        this.userEmail = freshData.email;
+                        this.userName = freshData.name;
+                        this.updateWelcomeMessage();
+                    }
+                }
+            }).catch(error => {
+                console.warn('Background user info refresh failed:', error);
+            });
+            
+            return;
+        }
+        
+        // No cache, fetch from API
+        const userInfo = await this.fetchUserInfoFromAPI();
+        if (userInfo) {
+            this.cacheManager.setCachedData('userInfo', userInfo);
+        }
+    }
+    
+    async fetchUserInfoFromAPI() {
         try {
             const response = await fetch(`https://www.googleapis.com/oauth2/v2/userinfo?access_token=${this.googleToken}`);
             if (response.ok) {
                 const data = await response.json();
                 if (data.name || data.email) {
+                    const userInfo = { email: data.email, name: data.name };
+                    
                     // Store user email for sheet ID lookup
                     if (data.email) {
                         this.userEmail = data.email;
@@ -481,11 +492,14 @@ class WorkoutTracker {
                         this.userName = data.name;
                         this.updateWelcomeMessage();
                     }
+                    
+                    return userInfo;
                 }
             }
         } catch (error) {
             console.error('Error loading user info:', error);
         }
+        return null;
     }
     
     updateWelcomeMessage() {
@@ -1278,6 +1292,41 @@ class WorkoutTracker {
         this.updateExerciseList();
         this.renderTodayWorkout();
         this.renderHistory();
+    }
+
+    async loadDataFromCache() {
+        // Load sessions from cache
+        const cachedSessions = this.cacheManager.getCachedData('sessions');
+        if (cachedSessions) {
+            this.sessions = cachedSessions;
+            this.currentSession = this.getTodaySession();
+        }
+        
+        // Load exercises from cache
+        const cachedExercises = this.cacheManager.getCachedData('exercises');
+        if (cachedExercises) {
+            this.exerciseList = cachedExercises;
+        }
+        
+        // Load plans from cache
+        const cachedPlans = this.cacheManager.getCachedData('plans');
+        if (cachedPlans) {
+            this.workoutPlans = cachedPlans;
+        }
+        
+        // Load default timer from cache
+        const cachedTimer = this.cacheManager.getCachedData('config', 'defaultTimer');
+        if (cachedTimer) {
+            this.defaultTimer = cachedTimer;
+        }
+        
+        // Load user info from cache
+        const cachedUserInfo = this.cacheManager.getCachedData('userInfo');
+        if (cachedUserInfo) {
+            this.userEmail = cachedUserInfo.email;
+            this.userName = cachedUserInfo.name;
+            this.updateWelcomeMessage();
+        }
     }
 
     async ensureValidToken() {
@@ -4607,6 +4656,12 @@ class WorkoutTracker {
             this.sessions.push(this.currentSession);
         }
 
+        // Save to cache first (immediate)
+        this.cacheManager.setCachedData('sessions', this.sessions);
+        
+        // Save to localStorage for backward compatibility
+        localStorage.setItem('workoutSessions', JSON.stringify(this.sessions));
+
         // Add exercise to list if not already there (at the end, preserving order)
         if (!this.exerciseListIncludes(exerciseName)) {
             this.exerciseList.push({
@@ -4616,6 +4671,7 @@ class WorkoutTracker {
                 isAerobic: false
             });
             // Don't sort - keep in sheet order
+            this.cacheManager.setCachedData('exercises', this.exerciseList);
             this.saveExerciseList();
         }
 
@@ -4714,6 +4770,17 @@ class WorkoutTracker {
                 await this.syncToSheet(true); // Silent sync - await to ensure it completes
             } catch (error) {
                 console.error('Error syncing exercise to sheet:', error);
+                
+                // Add to offline sync queue
+                this.cacheManager.addToSyncQueue({
+                    type: 'saveSession',
+                    data: {
+                        exercise: exercise,
+                        sessionDate: today,
+                        sessions: this.sessions
+                    }
+                });
+                
                 // Show a subtle notification that sync failed but data is saved locally
                 const statusEl = document.getElementById('sync-status');
                 if (statusEl) {
@@ -4725,6 +4792,16 @@ class WorkoutTracker {
                     setTimeout(() => this.updateSyncStatus(), 3000);
                 }
             }
+        } else {
+            // Not signed in or no sheet - add to sync queue for when connection is restored
+            this.cacheManager.addToSyncQueue({
+                type: 'saveSession',
+                data: {
+                    exercise: exercise,
+                    sessionDate: today,
+                    sessions: this.sessions
+                }
+            });
         }
     }
 
@@ -6052,22 +6129,45 @@ class WorkoutTracker {
     }
 
     async loadExerciseList() {
-        // Google Sheets is the only source of truth - no local storage
-        if (this.isSignedIn && this.sheetId) {
+        // Try cache first for immediate response
+        const cachedExerciseList = this.cacheManager.getCachedData('exercises');
+        if (cachedExerciseList) {
+            this.exerciseList = cachedExerciseList;
+            
+            // Refresh from sheet in background
+            this.loadExerciseListFromSheet().then(sheetExercises => {
+                if (sheetExercises) {
+                    this.exerciseList = sheetExercises;
+                    this.cacheManager.setCachedData('exercises', this.exerciseList);
+                    // Update UI if data changed
+                    this.updateExerciseList(true);
+                }
+            }).catch(error => {
+                console.warn('Background exercise refresh failed:', error);
+            });
+            
+            return this.exerciseList;
+        }
+
+        // No cache available, load from sheet
+        const staticSheetId = this.getStaticSheetId();
+        if (this.isSignedIn && staticSheetId) {
             try {
-                // Make sure Google Sheets is initialized
                 await this.initGoogleSheets();
                 const sheetExercises = await this.loadExerciseListFromSheet();
                 if (sheetExercises && sheetExercises.length > 0) {
-                    // Normalize to ensure all are objects
-                    return this.normalizeExerciseList(sheetExercises);
+                    this.cacheManager.setCachedData('exercises', sheetExercises);
+                    return sheetExercises;
                 }
+                return [];
             } catch (error) {
-                console.warn('Error loading exercise list from sheet:', error);
+                console.warn('Error loading exercises from sheet:', error);
+                if (!this.getStaticSheetId()) {
+                    return [];
+                }
             }
         }
         
-        // Return empty if not signed in or no sheet
         return [];
     }
 
@@ -6120,6 +6220,7 @@ class WorkoutTracker {
             
             // Normalize exercise list to ensure it's an array of objects
             const normalizedList = this.normalizeExerciseList(this.exerciseList);
+            localStorage.setItem('exerciseList', JSON.stringify(normalizedList));
             
             // Try to write to Exercises tab, create if it doesn't exist
             try {
@@ -6254,6 +6355,34 @@ class WorkoutTracker {
     }
 
     async loadWorkoutPlans() {
+        // Try cache first for immediate response
+        const cachedWorkoutPlans = this.cacheManager.getCachedData('plans');
+        if (cachedWorkoutPlans) {
+            this.workoutPlans = cachedWorkoutPlans;
+            
+            // Refresh from sheet in background
+            this.loadWorkoutPlansFromSheet().then(sheetPlans => {
+                if (sheetPlans) {
+                    this.workoutPlans = sheetPlans;
+                    this.cacheManager.setCachedData('plans', this.workoutPlans);
+                    // Update UI if data changed
+                    this.updatePlanDropdown();
+                }
+            }).catch(error => {
+                console.warn('Background plans refresh failed:', error);
+            });
+            
+            return this.workoutPlans;
+        }
+
+        const sheetPlans = await this.loadWorkoutPlansFromSheet();
+        if (sheetPlans) {
+            this.cacheManager.setCachedData('plans', sheetPlans);
+        }
+        return sheetPlans;
+    }
+
+    async loadWorkoutPlansFromSheet() {
         const staticSheetId = this.getStaticSheetId();
         if (!this.isSignedIn || !staticSheetId) return [];
 
@@ -6320,6 +6449,8 @@ class WorkoutTracker {
     async saveWorkoutPlans() {
         const staticSheetId = this.getStaticSheetId();
         if (!this.isSignedIn || !staticSheetId) return;
+
+        localStorage.setItem('workoutPlans', JSON.stringify(this.workoutPlans));
 
         try {
             await this.initGoogleSheets();
@@ -8057,17 +8188,40 @@ class WorkoutTracker {
         const indicator = document.getElementById('sync-indicator');
         const text = document.getElementById('sync-text');
         
+        // Get cache status
+        const cacheStatus = this.cacheManager ? this.cacheManager.getCacheStatus() : null;
+        const authStatus = this.authManager ? this.authManager.getAuthStatus() : null;
+        
         // Only show green when signed in, connected to sheet, AND all data is loaded
         if (this.isSignedIn && this.sheetId && this.dataLoaded) {
             if (indicator) indicator.textContent = '🟢';
-            if (text) text.textContent = 'Connected';
+            let statusText = 'Connected';
+            
+            // Add cache info if available
+            if (cacheStatus) {
+                if (!cacheStatus.isOnline) {
+                    statusText += ' (Offline)';
+                    if (indicator) indicator.textContent = '🟠';
+                } else if (cacheStatus.pendingOperations > 0) {
+                    statusText += ` (${cacheStatus.pendingOperations} pending)`;
+                }
+            }
+            
+            if (text) text.textContent = statusText;
         } else if (this.isSignedIn && this.sheetId) {
             // Signed in and connected but data still loading
             if (indicator) indicator.textContent = '🟡';
             if (text) text.textContent = 'Loading...';
         } else if (this.isSignedIn) {
             if (indicator) indicator.textContent = '🟡';
-            if (text) text.textContent = 'Signed In';
+            let statusText = 'Signed In';
+            
+            // Show token refresh status
+            if (authStatus && authStatus.refreshInProgress) {
+                statusText = 'Refreshing...';
+            }
+            
+            if (text) text.textContent = statusText;
         } else {
             if (indicator) indicator.textContent = '⚪';
             if (text) text.textContent = 'Not Connected';
@@ -8283,28 +8437,46 @@ class WorkoutTracker {
     }
 
     async loadSessions() {
-        // Google Sheets is the only source of truth - no local storage
+        // Try cache first for immediate response
+        const cachedSessions = this.cacheManager.getCachedData('sessions');
+        if (cachedSessions) {
+            this.sessions = cachedSessions;
+            
+            // Refresh from sheet in background
+            this.loadSessionsFromSheet().then(sheetSessions => {
+                if (sheetSessions) {
+                    this.sessions = sheetSessions;
+                    this.cacheManager.setCachedData('sessions', this.sessions);
+                    // Update UI if data changed
+                    this.renderTodayWorkout();
+                    this.renderHistory();
+                }
+            }).catch(error => {
+                console.warn('Background session refresh failed:', error);
+            });
+            
+            return this.sessions;
+        }
+
+        // No cache available, load from sheet
         const sessionsSheetId = this.getSessionsSheetId();
         if (this.isSignedIn && sessionsSheetId) {
             try {
                 await this.initGoogleSheets();
                 const sheetSessions = await this.loadSessionsFromSheet();
                 if (sheetSessions && sheetSessions.length > 0) {
+                    this.cacheManager.setCachedData('sessions', sheetSessions);
                     return sheetSessions;
                 }
-                // If sheetSessions is null, it means the sheet was invalid and has been cleared
-                // Return empty array
                 return [];
             } catch (error) {
                 console.warn('Error loading sessions from sheet:', error);
-                // If sheet ID was cleared during validation, return empty
                 if (!this.getSessionsSheetId()) {
                     return [];
                 }
             }
         }
         
-        // Return empty if not signed in or no sheet
         return [];
     }
 
@@ -8742,7 +8914,12 @@ class WorkoutTracker {
 // Initialize app when DOM is ready
 document.addEventListener('DOMContentLoaded', () => {
     try {
-        new WorkoutTracker();
+        // Initialize cache and auth managers first
+        window.cacheManager = new CacheManager();
+        window.authManager = new AuthManager();
+        
+        // Initialize the main app
+        window.workoutTracker = new WorkoutTracker();
     } catch (error) {
         console.error('Error initializing WorkoutTracker:', error);
         alert('Error loading app. Check console for details.');
