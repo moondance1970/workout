@@ -472,9 +472,22 @@ textarea:focus {
     box-shadow: 0 0 0 3px rgba(232, 93, 117, 0.1);
 }
 
+input[type="number"]:focus {
+    outline: none;
+    border-color: var(--input-focus);
+    box-shadow: 0 0 0 3px rgba(232, 93, 117, 0.1);
+}
+
 input::placeholder {
     color: var(--text-tertiary);
     font-weight: 400;
+}
+
+input[type="number"] {
+    font-size: var(--font-size-md);
+    font-weight: 700;  /* Changed from 500 to 700 (bold) */
+    font-family: inherit;
+    transition: all 0.2s ease;
 }
 
 /* ============================================
@@ -511,6 +524,7 @@ input::placeholder {
     flex: 1;
     background: var(--bg-secondary);
     border-color: var(--border-primary);
+    max-width: 120px;
 }
 
 /* ============================================
