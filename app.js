@@ -1484,6 +1484,21 @@ class WorkoutTracker {
             });
         }
         
+        // Theme toggle
+        const themeToggle = document.getElementById('themeToggle');
+        if (themeToggle) {
+            // Sync slider position with current theme
+            const currentTheme = document.documentElement.getAttribute('data-theme');
+            themeToggle.checked = (currentTheme === 'dark');
+            
+            // Handle toggle changes
+            themeToggle.addEventListener('change', function() {
+                const newTheme = this.checked ? 'dark' : 'light';
+                document.documentElement.setAttribute('data-theme', newTheme);
+                localStorage.setItem('theme', newTheme);
+            });
+        }
+        
         // Plan dropdown change handler
         const planDropdown = document.getElementById('select-plan-dropdown');
         if (planDropdown) {

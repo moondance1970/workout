@@ -21,9 +21,24 @@
     <!-- Enhanced Cache and Auth Managers -->
     <script src="cache-manager.js"></script>
     <script src="auth-manager.js"></script>
+
+    <script>
+        (function() {
+        const savedTheme = localStorage.getItem('theme');
+        const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+        const theme = savedTheme || (prefersDark ? 'dark' : 'light');
+        document.documentElement.setAttribute('data-theme', theme);
+    })();
+    </script>
 </head>
 <body>
     <div class="container">
+        <div class="theme-switch-wrapper">
+            <label class="theme-switch">
+                <input type="checkbox" id="themeToggle">
+                <span class="slider"></span>
+            </label>
+        </div>
         <header>
             <h1>💪 Workout Tracker</h1>
             <div class="sync-status" id="sync-status">
