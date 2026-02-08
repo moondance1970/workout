@@ -4520,9 +4520,9 @@ class WorkoutTracker {
                 group.innerHTML = `
                     <label>Set ${i}:</label>
                     <div style="display: flex; gap: 10px; align-items: center;">
-                        <input type="number" class="rep-input" data-set="${i}" placeholder="Reps" min="0" value="${repValue}" style="width: 80px;">
+                        <input type="number" class="rep-input" data-set="${i}" placeholder="Reps" min="0" value="${repValue}" inputmode="numeric" onfocus="this.select()" onclick="this.select()">
                         <span>×</span>
-                        <input type="number" class="weight-input" data-set="${i}" placeholder="Weight (kg)" min="0" step="0.5" value="${weightValue}" style="width: 100px;">
+                        <input type="number" class="weight-input" data-set="${i}" placeholder="Weight (kg)" min="0" step="0.5" value="${weightValue}" inputmode="numeric" onfocus="this.select()" onclick="this.select()">
                     </div>
                 `;
                 container.appendChild(group);
