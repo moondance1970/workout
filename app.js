@@ -1165,18 +1165,18 @@ class WorkoutTracker {
 
     updateHeaderButtons() {
         // Show purpose section only when not fully connected (hide when connected to sheet and data loaded)
-        const purposeSection = document.getElementById('app-purpose-section');
-        if (purposeSection) {
-            // Only hide when fully connected: signed in, has sheet ID, and data is loaded
-            const isFullyConnected = this.isSignedIn && this.sheetId && this.dataLoaded;
-            if (isFullyConnected) {
-                purposeSection.style.display = 'none';
-            } else {
-                // Explicitly show it when not fully connected
-                purposeSection.style.display = 'block';
-                purposeSection.style.visibility = 'visible';
-            }
-        }
+        // const purposeSection = document.getElementById('app-purpose-section');
+        // if (purposeSection) {
+        //     // Only hide when fully connected: signed in, has sheet ID, and data is loaded
+        //     const isFullyConnected = this.isSignedIn && this.sheetId && this.dataLoaded;
+        //     if (isFullyConnected) {
+        //         purposeSection.style.display = 'none';
+        //     } else {
+        //         // Explicitly show it when not fully connected
+        //         purposeSection.style.display = 'block';
+        //         purposeSection.style.visibility = 'visible';
+        //     }
+        // }
         
         // Update welcome message visibility
         if (!this.isSignedIn) {
@@ -1471,7 +1471,7 @@ class WorkoutTracker {
         // Settings tab removed - all data is cloud-based
         // Settings tab removed - all data is cloud-based
         document.getElementById('session-btn').addEventListener('click', () => this.handleSessionButton());
-        
+
         // Start session button in track tab
         const startSessionBtn = document.getElementById('start-session-btn');
         if (startSessionBtn) {

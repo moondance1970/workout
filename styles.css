@@ -1063,3 +1063,8 @@ footer a:hover {
         letter-spacing: 0.08em;
     }
 }
+
+/* App purpose section */
+#app-purpose-section {
+    display: none;
+}
