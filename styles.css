@@ -96,6 +96,9 @@
     --input-bg: #32323a;          /* Darker, more subtle */
     --input-border: #3a3a42;      /* Matches border-primary */
     --input-focus: #e85d75;
+
+    /* Instruct the browser to render all native UI controls in their dark variant */
+    color-scheme: dark;
 }
 
 /* ============================================
