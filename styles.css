@@ -492,6 +492,18 @@ input[type="number"] {
     transition: all 0.2s ease;
 }
 
+/* Number input - disable context menu toolbar on mobile browsers */
+input[type="number"] {
+    -webkit-touch-callout: none;
+
+}
+/* Allow number input to be selected, but prevent copy/paste toolbar */
+input[type="number"]:focus {
+    -webkit-user-select: text;
+    user-select: text;
+}
+
+
 /* ============================================
    REP INPUT GROUPS
    ============================================ */
