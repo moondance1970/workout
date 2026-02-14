@@ -8887,12 +8887,12 @@ class WorkoutTracker {
 
         if (this.sessionActive) {
             sessionBtn.textContent = 'End Session';
-            sessionBtn.style.background = 'rgba(244, 67, 54, 0.9)';
-            sessionBtn.style.borderColor = 'rgba(244, 67, 54, 1)';
+            sessionBtn.classList.add('session-active');
+            sessionBtn.classList.remove('session-inactive');
         } else {
             sessionBtn.textContent = 'New Session';
-            sessionBtn.style.background = 'rgba(255, 255, 255, 0.2)';
-            sessionBtn.style.borderColor = 'rgba(255, 255, 255, 0.3)';
+            sessionBtn.classList.add('session-inactive');
+            sessionBtn.classList.remove('session-active');
         }
         
         // Also update the start session button in track tab
@@ -8907,8 +8907,7 @@ class WorkoutTracker {
         
         if (this.sessionActive) {
             startSessionBtn.textContent = 'End Session';
-            startSessionBtn.style.background = 'rgba(244, 67, 54, 0.9)';
-            startSessionBtn.style.borderColor = 'rgba(244, 67, 54, 1)';
+            startSessionBtn.classList.add('session-active');
             if (saveWorkoutBtn) {
                 saveWorkoutBtn.style.display = 'inline-block';
             }
@@ -8917,8 +8916,7 @@ class WorkoutTracker {
             }
         } else {
             startSessionBtn.textContent = 'Start Session';
-            startSessionBtn.style.background = '';
-            startSessionBtn.style.borderColor = '';
+            startSessionBtn.classList.remove('session-active');
             if (saveWorkoutBtn) {
                 saveWorkoutBtn.style.display = 'none';
             }

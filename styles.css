@@ -25,7 +25,7 @@
     --accent-primary-hover: #e04763;
     --accent-secondary: #eb7088;
     --accent-success: #4caf50;
-    --accent-danger: #ef4444;
+    --accent-danger: #e82547;
     
     --overlay-bg: rgba(26, 29, 41, 0.6);
     --overlay-bg-dark: rgba(26, 29, 41, 0.8);
@@ -88,7 +88,7 @@
     --accent-primary-hover: #eb7088;
     --accent-secondary: #e04763;
     --accent-success: #10b981;
-    --accent-danger: #ef4444;
+    --accent-danger: #e82547;
     
     --overlay-bg: rgba(0, 0, 0, 0.7);
     --overlay-bg-dark: rgba(0, 0, 0, 0.85);
@@ -277,6 +277,31 @@ button {
     opacity: 0.5;
     cursor: not-allowed;
     transform: none;
+}
+
+/* Active state (End Session) */
+#session-btn.session-active,
+#start-session-btn.session-active {
+    background: var(--accent-danger);
+    border-color: var(--accent-danger);
+}
+
+#session-btn.session-active:hover,
+#start-session-btn.session-active:hover {
+    background: var(--accent-danger);
+    opacity: 0.8;
+}
+
+/* Inactive state (New Session) - muted appearance */
+#session-btn.session-inactive {
+    background: var(--bg-secondary);
+    border-color: var(--border-primary);
+    color: var(--accent-primary);
+}
+
+#session-btn.session-inactive:hover {
+    background: var(--bg-tertiary);
+    border-color: var(--text-primary);
 }
 
 /* Secondary Button */
