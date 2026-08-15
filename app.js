@@ -36,7 +36,6 @@ class WorkoutTracker {
         this.duplicateSheetsToDelete = []; // Store duplicate sheets that can be deleted after user confirms
         this.staticSheetId = null; // Sheet ID for static/shared data (Plans, Exercises, Config)
         this.sessionsSheetId = null; // Sheet ID for private data (workout sessions)
-        this.lastSavedExerciseState = null; // Track last saved state for auto-save detection
         this.dataLoaded = false; // Track if all data has been fully loaded
         this.selectingExercise = false; // Flag to prevent infinite loops in selectFirstExercise
         this.completedPlanExercises = []; // Track which exercises have been completed in current plan session (don't modify plan permanently)
@@ -1538,13 +1537,15 @@ class WorkoutTracker {
             
             // Set flag to indicate this is a manual exercise switch (don't auto-start timer)
             this.manuallySwitchingExercise = true;
-            
-            // Check if there are unsaved changes to weight or reps before switching
-            if (this.hasUnsavedWeightOrRepsChanges()) {
-                // Auto-save current exercise before switching (but don't start timer)
-                await this.saveExercise();
-            }
-            
+
+            // NOTE: This used to silently auto-save the exercise you were switching away
+            // from if it looked like it had "unsaved changes". That check ran after the
+            // <select> had already flipped to the newly-picked exercise, so it actually
+            // saved the new exercise (using whatever leftover values were still in the
+            // form) as completed - without you ever pressing "Save Exercise". Nothing gets
+            // logged now until you explicitly click Save; switching exercises just clears
+            // the form like normal.
+
             // Clear the manual switch flag after a delay
             setTimeout(() => {
                 this.manuallySwitchingExercise = false;
@@ -1573,18 +1574,12 @@ class WorkoutTracker {
                 
                 // Show last time and recommendations for selected exercise (this will populate form with last exercise's values)
                 this.showExercisePreview(selectedExercise);
-                
-                // Store initial state after switching (use setTimeout to ensure inputs are rendered)
-                setTimeout(() => {
-                    this.storeCurrentExerciseState();
-                }, 100);
             } else {
                 // Clear recommendations if no exercise selected
                 const container = document.getElementById('recommendations-content');
                 container.innerHTML = '<p class="no-data">Select an exercise to see your last session and recommendations</p>';
                 // Reset to default reps/weight inputs
                 this.updateRepsInputs();
-                this.lastSavedExerciseState = null;
             }
         });
 
@@ -5054,10 +5049,7 @@ class WorkoutTracker {
         this.updateExerciseList();
         this.renderTodayWorkout();
         this.showRecommendations(exercise);
-        
-        // Store state after saving
-        this.storeCurrentExerciseState();
-        
+
         // Clear form (but preserve exercise selection if manually switching)
         // Wrap in try-catch to prevent errors from stopping timer
         try {
@@ -5123,118 +5115,9 @@ class WorkoutTracker {
         }
     }
 
-    storeCurrentExerciseState() {
-        const exerciseName = document.getElementById('exercise-name').value.trim();
-        if (!exerciseName) {
-            this.lastSavedExerciseState = null;
-            return;
-        }
-        
-        // Check if exercise is aerobic
-        const exerciseConfig = this.getExerciseByName(exerciseName);
-        const isAerobic = exerciseConfig && exerciseConfig.isAerobic;
-        
-        if (isAerobic) {
-            // For aerobic exercises, we don't track changes (only weight/reps matter)
-            this.lastSavedExerciseState = null;
-            return;
-        }
-        
-        // For non-aerobic exercises, track sets, reps, and weights
-        const sets = parseInt(document.getElementById('sets').value) || 3;
-        const reps = [];
-        const weights = [];
-        
-        document.querySelectorAll('.rep-input').forEach(input => {
-            reps.push(parseInt(input.value) || 0);
-        });
-        document.querySelectorAll('.weight-input').forEach(input => {
-            weights.push(parseFloat(input.value) || 0);
-        });
-        
-        this.lastSavedExerciseState = {
-            exerciseName: exerciseName,
-            sets: sets,
-            reps: reps,
-            weights: weights
-        };
-    }
-
-    hasUnsavedWeightOrRepsChanges() {
-        if (!this.lastSavedExerciseState) {
-            // No previous state - check if there are any non-zero values
-            const sets = parseInt(document.getElementById('sets').value) || 3;
-            const repInputs = document.querySelectorAll('.rep-input');
-            const weightInputs = document.querySelectorAll('.weight-input');
-            
-            // Check if any rep or weight has a non-zero value
-            let hasValues = false;
-            repInputs.forEach(input => {
-                if (parseInt(input.value) > 0) hasValues = true;
-            });
-            weightInputs.forEach(input => {
-                if (parseFloat(input.value) > 0) hasValues = true;
-            });
-            
-            // If sets changed from default (3), consider it a change
-            if (sets !== 3) hasValues = true;
-            
-            return hasValues;
-        }
-        
-        const currentExerciseName = document.getElementById('exercise-name').value.trim();
-        if (currentExerciseName !== this.lastSavedExerciseState.exerciseName) {
-            // Different exercise - no unsaved changes for current exercise
-            return false;
-        }
-        
-        // Check if exercise is aerobic
-        const exerciseConfig = this.getExerciseByName(currentExerciseName);
-        const isAerobic = exerciseConfig && exerciseConfig.isAerobic;
-        if (isAerobic) {
-            // For aerobic exercises, we don't track weight/reps changes
-            return false;
-        }
-        
-        // Compare sets
-        const currentSets = parseInt(document.getElementById('sets').value) || 3;
-        if (currentSets !== this.lastSavedExerciseState.sets) {
-            return true;
-        }
-        
-        // Compare reps and weights
-        const currentReps = [];
-        const currentWeights = [];
-        
-        document.querySelectorAll('.rep-input').forEach(input => {
-            currentReps.push(parseInt(input.value) || 0);
-        });
-        document.querySelectorAll('.weight-input').forEach(input => {
-            currentWeights.push(parseFloat(input.value) || 0);
-        });
-        
-        // Compare arrays
-        if (currentReps.length !== this.lastSavedExerciseState.reps.length) {
-            return true;
-        }
-        if (currentWeights.length !== this.lastSavedExerciseState.weights.length) {
-            return true;
-        }
-        
-        for (let i = 0; i < currentReps.length; i++) {
-            if (currentReps[i] !== this.lastSavedExerciseState.reps[i]) {
-                return true;
-            }
-        }
-        
-        for (let i = 0; i < currentWeights.length; i++) {
-            if (currentWeights[i] !== this.lastSavedExerciseState.weights[i]) {
-                return true;
-            }
-        }
-        
-        return false;
-    }
+    // NOTE: storeCurrentExerciseState()/hasUnsavedWeightOrRepsChanges() used to live here
+    // and drove a silent "auto-save the exercise you're switching away from" behavior.
+    // Both have been removed - see the comment in the exercise-name change handler for why.
 
     clearForm() {
         document.getElementById('exercise-name').value = '';
