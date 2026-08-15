@@ -22,6 +22,7 @@ class WorkoutTracker {
         this.googleConfig = null; // Will be set from GOOGLE_CONFIG or API
         this.exerciseList = []; // Will be loaded asynchronously - array of objects: {name, timerDuration?, youtubeLink?, isAerobic}
         this.defaultTimer = 60; // Default rest timer in seconds (1 minute)
+        this.durationPresets = [5, 10, 15, 20, 30, 45, 60]; // Quick-pick durations (minutes) for aerobic exercises
         this.userEmail = null; // Store user email for per-user sheet ID
         this.userName = null; // Store user name for personalization
         this.sessionActive = false; // Track if a session is currently active
@@ -29,7 +30,7 @@ class WorkoutTracker {
         this.restTimerSeconds = 0; // Current timer seconds
         this.restTimerDuration = 60; // Default rest time in seconds (1 minute)
         this.tokenRequestInProgress = false; // Prevent multiple simultaneous token requests
-        this.workoutPlans = []; // Array of workout plans: {id, name, exerciseSlots: [{slotNumber, exerciseName}], createdAt, createdBy, creatorSheetId}
+        this.workoutPlans = []; // Array of workout plans: {id, name, exerciseSlots: [{slotNumber, exerciseName, targetSets?, targetReps?, targetWeight?, targetDuration?}], createdAt, createdBy, creatorSheetId}
         this.currentPlanIndex = -1; // Index of current active plan (-1 means no plan active)
         this.activePlanId = null; // ID of currently active plan
         this.duplicateSheetsToDelete = []; // Store duplicate sheets that can be deleted after user confirms
@@ -1319,7 +1320,13 @@ class WorkoutTracker {
         if (cachedTimer) {
             this.defaultTimer = cachedTimer;
         }
-        
+
+        // Load aerobic duration presets from cache
+        const cachedDurationPresets = this.cacheManager.getCachedData('config', 'durationPresets');
+        if (cachedDurationPresets && cachedDurationPresets.length > 0) {
+            this.durationPresets = cachedDurationPresets;
+        }
+
         // Load user info from cache
         const cachedUserInfo = this.cacheManager.getCachedData('userInfo');
         if (cachedUserInfo) {
@@ -1749,6 +1756,15 @@ class WorkoutTracker {
         if (addExerciseConfigBtn) {
             addExerciseConfigBtn.addEventListener('click', () => this.addExerciseConfiguration());
         }
+
+        // Aerobic exercise duration presets - save immediately when the field is edited
+        const durationPresetsInput = document.getElementById('duration-presets-input');
+        if (durationPresetsInput) {
+            durationPresetsInput.addEventListener('change', () => {
+                this.saveDurationPresets(durationPresetsInput.value);
+                durationPresetsInput.value = this.durationPresets.join(', ');
+            });
+        }
     }
 
     updateTimerHiddenInput() {
@@ -1767,7 +1783,7 @@ class WorkoutTracker {
     async renderConfigurationTab() {
         // Load default timer from Google Sheets if available
         await this.loadDefaultTimer();
-        
+
         // Set default timer inputs (minutes and seconds)
         const minutesInput = document.getElementById('timer-minutes');
         const secondsInput = document.getElementById('default-timer-seconds');
@@ -1778,16 +1794,23 @@ class WorkoutTracker {
             minutesInput.value = minutes;
             secondsInput.value = seconds;
         }
-        
+
         // Set hidden input for backward compatibility
         const defaultTimerInput = document.getElementById('default-timer');
         if (defaultTimerInput) {
             defaultTimerInput.value = this.formatRestTimer(this.defaultTimer);
         }
-        
+
+        // Load and display aerobic exercise duration presets
+        await this.loadDurationPresets();
+        const durationPresetsInput = document.getElementById('duration-presets-input');
+        if (durationPresetsInput) {
+            durationPresetsInput.value = this.durationPresets.join(', ');
+        }
+
         // Render exercise configuration list
         this.renderExerciseConfigList();
-        
+
         // Render progress sharing management
         this.renderProgressSharingList();
     }
@@ -2048,7 +2071,10 @@ class WorkoutTracker {
         // Update default timer
         this.defaultTimer = totalSeconds;
         this.restTimerDuration = totalSeconds; // Also update current rest timer duration
-        
+
+        // Update local cache immediately so the change is reflected right away
+        this.cacheManager.setCachedData('config', totalSeconds, 'defaultTimer');
+
         // Update ALL exercises to use the new default timer value
         // Normalize first to ensure we have objects
         this.exerciseList = this.normalizeExerciseList(this.exerciseList);
@@ -2057,9 +2083,10 @@ class WorkoutTracker {
             exercise.timerDuration = totalSeconds;
             updatedCount++;
         });
-        
+
         // Save updated exercise list
         if (updatedCount > 0) {
+            this.cacheManager.setCachedData('exercises', this.exerciseList);
             await this.saveExerciseList();
             this.updateExerciseList();
             this.renderExerciseConfigList();
@@ -2173,6 +2200,65 @@ class WorkoutTracker {
         } catch (error) {
             console.error('Error saving default timer to sheet:', error);
             throw error;
+        }
+    }
+
+    // Parse a comma-separated list of minute values (e.g. "5, 10, 15") into a sorted,
+    // de-duplicated array of positive integers. Falls back to the current presets if empty.
+    parseDurationPresetsInput(text) {
+        const minutes = (text || '')
+            .split(',')
+            .map(part => parseInt(part.trim(), 10))
+            .filter(n => Number.isInteger(n) && n > 0);
+        const unique = Array.from(new Set(minutes)).sort((a, b) => a - b);
+        return unique.length > 0 ? unique : this.durationPresets;
+    }
+
+    async loadDurationPresets() {
+        const staticSheetId = this.getStaticSheetId();
+        if (!this.isSignedIn || !staticSheetId) return;
+
+        try {
+            await this.initGoogleSheets();
+            const response = await gapi.client.sheets.spreadsheets.values.get({
+                spreadsheetId: staticSheetId,
+                range: 'Config!C1'
+            });
+
+            if (response.result.values && response.result.values.length > 0 && response.result.values[0].length > 0) {
+                const presetsStr = String(response.result.values[0][0]).trim();
+                if (presetsStr) {
+                    this.durationPresets = this.parseDurationPresetsInput(presetsStr);
+                }
+            }
+        } catch (error) {
+            // Config sheet might not exist yet, that's okay
+            console.log('Config sheet not found or error loading duration presets:', error.message);
+        }
+    }
+
+    async saveDurationPresets(text) {
+        this.durationPresets = this.parseDurationPresetsInput(text);
+
+        // Update local cache immediately so the change is reflected right away
+        this.cacheManager.setCachedData('config', this.durationPresets, 'durationPresets');
+
+        // Refresh the quick-pick dropdown if an aerobic exercise duration input is showing
+        this.updateRepsInputs();
+
+        const staticSheetId = this.getStaticSheetId();
+        if (!this.isSignedIn || !staticSheetId) return;
+
+        try {
+            await this.initGoogleSheets();
+            await gapi.client.sheets.spreadsheets.values.update({
+                spreadsheetId: staticSheetId,
+                range: 'Config!C1',
+                valueInputOption: 'RAW',
+                resource: { values: [[this.durationPresets.join(',')]] }
+            });
+        } catch (error) {
+            console.error('Error saving duration presets to sheet:', error);
         }
     }
 
@@ -2656,17 +2742,20 @@ class WorkoutTracker {
             youtubeLink: youtubeLink,
             isAerobic: isAerobic
         });
-        
+
+        // Update local cache immediately so the change is reflected right away
+        this.cacheManager.setCachedData('exercises', this.exerciseList);
+
         // Save to Google Sheets immediately
         await this.saveExerciseList();
         this.updateExerciseList();
-        
+
         // Re-render list
         this.renderExerciseConfigList();
-        
+
         // Close modal
         document.body.removeChild(modal);
-        
+
         alert('Exercise added successfully!');
     }
 
@@ -2869,17 +2958,20 @@ class WorkoutTracker {
             youtubeLink: youtubeLink,
             isAerobic: isAerobic
         };
-        
+
+        // Update local cache immediately so the change is reflected right away
+        this.cacheManager.setCachedData('exercises', this.exerciseList);
+
         // Save to Google Sheets immediately
         await this.saveExerciseList();
         this.updateExerciseList();
-        
+
         // Re-render list
         this.renderExerciseConfigList();
-        
+
         // Close modal
         document.body.removeChild(modal);
-        
+
         alert('Exercise updated successfully!');
     }
 
@@ -2922,11 +3014,14 @@ class WorkoutTracker {
             youtubeLink: youtubeLink,
             isAerobic: isAerobic
         };
-        
+
+        // Update local cache immediately so the change is reflected right away
+        this.cacheManager.setCachedData('exercises', this.exerciseList);
+
         // Save to Google Sheets
         this.saveExerciseList();
         this.updateExerciseList();
-        
+
         // Clear form and reset button
         nameInput.value = '';
         timerInput.value = '';
@@ -2954,11 +3049,14 @@ class WorkoutTracker {
         
         // Remove from list
         this.exerciseList.splice(index, 1);
-        
+
+        // Update local cache immediately so the change is reflected right away
+        this.cacheManager.setCachedData('exercises', this.exerciseList);
+
         // Save to Google Sheets
         this.saveExerciseList();
         this.updateExerciseList();
-        
+
         // Re-render list
         this.renderExerciseConfigList();
         
@@ -2999,10 +3097,22 @@ class WorkoutTracker {
             this.workoutPlans.forEach((plan, index) => {
                 const exerciseCount = plan.exerciseSlots ? plan.exerciseSlots.length : 0;
                 const isActive = this.activePlanId === plan.id;
+
+                let exerciseListHtml = '';
+                if (plan.exerciseSlots && plan.exerciseSlots.length > 0) {
+                    exerciseListHtml = '<ul class="plan-exercise-summary" style="margin: 8px 0; padding-left: 18px; font-size: 13px; color: #555;">';
+                    plan.exerciseSlots.forEach(slot => {
+                        const target = this.formatPlanSlotTarget(slot);
+                        exerciseListHtml += `<li>${slot.exerciseName}${target ? ` — ${target}` : ''}</li>`;
+                    });
+                    exerciseListHtml += '</ul>';
+                }
+
                 html += `
                     <div class="plan-card ${isActive ? 'active' : ''}">
                         <h4>${plan.name}</h4>
                         <p class="plan-meta">${exerciseCount} exercise${exerciseCount !== 1 ? 's' : ''}</p>
+                        ${exerciseListHtml}
                         ${isActive ? '<p class="plan-status">✓ Active</p>' : ''}
                         <div class="plan-actions">
                             <button class="btn-secondary edit-plan-btn" data-index="${index}" style="padding: 5px 10px; font-size: 12px; margin-right: 5px;">Edit</button>
@@ -3330,21 +3440,29 @@ class WorkoutTracker {
                 select.appendChild(option);
             });
             
-            // Add change event listener to update other dropdowns
-            select.addEventListener('change', () => this.updatePlanSlotOptions());
-            
+            // Target sets/reps/weight (or duration for aerobic exercises) for this slot
+            const targetContainer = document.createElement('div');
+            targetContainer.className = 'plan-slot-target';
+
+            // Add change event listener to update other dropdowns and the target fields
+            select.addEventListener('change', () => {
+                this.updatePlanSlotOptions();
+                this.renderPlanSlotTargetFields(targetContainer, select.value.trim());
+            });
+
             // Add drag handle icon
             const dragHandle = document.createElement('span');
             dragHandle.innerHTML = '☰';
             dragHandle.style.cssText = 'position: absolute; left: -20px; top: 50%; transform: translateY(-50%); cursor: move; color: #999; font-size: 18px;';
             dragHandle.style.pointerEvents = 'none';
-            
+
             const label = document.createElement('label');
             label.textContent = `Exercise Slot ${i}`;
-            
+
             group.appendChild(dragHandle);
             group.appendChild(label);
             group.appendChild(select);
+            group.appendChild(targetContainer);
             container.appendChild(group);
             
             // Add drag event listeners
@@ -3387,9 +3505,120 @@ class WorkoutTracker {
         
         // Initial update to filter options
         this.updatePlanSlotOptions();
-        
+
         document.getElementById('save-plan-btn').style.display = 'inline-block';
         document.getElementById('cancel-plan-btn').style.display = 'inline-block';
+    }
+
+    // Render the target sets/reps/weight (or target duration for aerobic exercises)
+    // fields for a single plan slot. `existingSlot` (optional) pre-fills saved targets
+    // when editing a plan.
+    renderPlanSlotTargetFields(container, exerciseName, existingSlot = null) {
+        if (!exerciseName) {
+            container.innerHTML = '';
+            return;
+        }
+
+        const exerciseConfig = this.getExerciseByName(exerciseName);
+        const isAerobic = exerciseConfig && exerciseConfig.isAerobic;
+
+        if (isAerobic) {
+            const minutes = existingSlot && existingSlot.targetDuration ? Math.floor(existingSlot.targetDuration / 60) : '';
+            const seconds = existingSlot && existingSlot.targetDuration ? existingSlot.targetDuration % 60 : '';
+            container.innerHTML = `
+                <label style="font-size: 12px; color: #666; display: block; margin: 8px 0 5px;">Target Duration (optional)</label>
+                <div style="display: flex; align-items: center; gap: 8px;">
+                    <input type="number" class="plan-target-duration-minutes exercise-duration-input" min="0" placeholder="Min" value="${minutes}" style="width: 65px; text-align: center;">
+                    <span>min</span>
+                    <input type="number" class="plan-target-duration-seconds exercise-duration-input" min="0" max="59" placeholder="Sec" value="${seconds}" style="width: 65px; text-align: center;">
+                    <span>sec</span>
+                </div>
+            `;
+        } else {
+            const sets = existingSlot && existingSlot.targetSets ? existingSlot.targetSets : '';
+            const reps = existingSlot && existingSlot.targetReps ? existingSlot.targetReps : '';
+            const weight = existingSlot && existingSlot.targetWeight ? existingSlot.targetWeight : '';
+            container.innerHTML = `
+                <label style="font-size: 12px; color: #666; display: block; margin: 8px 0 5px;">Target (optional)</label>
+                <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
+                    <input type="number" class="plan-target-sets exercise-duration-input" min="1" placeholder="Sets" value="${sets}" style="width: 65px; text-align: center;">
+                    <span>sets ×</span>
+                    <input type="number" class="plan-target-reps exercise-duration-input" min="0" placeholder="Reps" value="${reps}" style="width: 65px; text-align: center;">
+                    <span>reps @</span>
+                    <input type="number" class="plan-target-weight exercise-duration-input" min="0" step="0.5" placeholder="Weight" value="${weight}" style="width: 75px; text-align: center;">
+                    <span>kg</span>
+                </div>
+            `;
+        }
+    }
+
+    // Format a plan slot's target into a short display string, e.g. "3×10 @ 40kg" or "20:00"
+    formatPlanSlotTarget(slot) {
+        if (!slot) return '';
+        const exerciseConfig = this.getExerciseByName(slot.exerciseName);
+        const isAerobic = exerciseConfig && exerciseConfig.isAerobic;
+
+        if (isAerobic) {
+            return slot.targetDuration ? this.formatExerciseDuration(slot.targetDuration) : '';
+        }
+
+        const parts = [];
+        if (slot.targetSets && slot.targetReps) {
+            parts.push(`${slot.targetSets}×${slot.targetReps}`);
+        } else if (slot.targetSets) {
+            parts.push(`${slot.targetSets} sets`);
+        } else if (slot.targetReps) {
+            parts.push(`${slot.targetReps} reps`);
+        }
+        if (slot.targetWeight) {
+            parts.push(`@ ${slot.targetWeight}kg`);
+        }
+        return parts.join(' ');
+    }
+
+    // Find the active plan's slot for a given exercise name, if any
+    getActivePlanSlotForExercise(exerciseName) {
+        if (!this.activePlanId || !exerciseName) return null;
+        const plan = this.workoutPlans.find(p => p.id === this.activePlanId);
+        if (!plan || !plan.exerciseSlots) return null;
+        return plan.exerciseSlots.find(slot =>
+            slot.exerciseName && slot.exerciseName.toLowerCase() === exerciseName.toLowerCase()
+        ) || null;
+    }
+
+    // Fill the tracking form with a plan slot's target values (used when there's no
+    // prior history for the exercise yet, so there's nothing else to pre-fill from)
+    applyPlanTargetToForm(slot) {
+        const exerciseConfig = this.getExerciseByName(slot.exerciseName);
+        const isAerobic = exerciseConfig && exerciseConfig.isAerobic;
+
+        this.clearFormFields();
+
+        if (isAerobic) {
+            if (!slot.targetDuration) return;
+            const minutesInput = document.getElementById('exercise-duration-minutes');
+            const secondsInput = document.getElementById('exercise-duration-seconds');
+            if (minutesInput && secondsInput) {
+                minutesInput.value = Math.floor(slot.targetDuration / 60);
+                secondsInput.value = slot.targetDuration % 60;
+                minutesInput.dispatchEvent(new Event('input'));
+            }
+            return;
+        }
+
+        if (slot.targetSets) {
+            const setsInput = document.getElementById('sets');
+            if (setsInput) {
+                setsInput.value = slot.targetSets;
+                this.updateRepsInputs();
+            }
+        }
+        if (slot.targetReps) {
+            document.querySelectorAll('.rep-input').forEach(input => { input.value = slot.targetReps; });
+        }
+        if (slot.targetWeight) {
+            document.querySelectorAll('.weight-input').forEach(input => { input.value = slot.targetWeight; });
+        }
     }
 
     reorderPlanSlots(draggedIndex, targetIndex) {
@@ -3489,10 +3718,32 @@ class WorkoutTracker {
             if (select) {
                 const exerciseName = select.value.trim();
                 if (exerciseName) {
-                    exerciseSlots.push({
-                        slotNumber: index + 1,
-                        exerciseName: exerciseName
-                    });
+                    const slot = { slotNumber: index + 1, exerciseName: exerciseName };
+
+                    // Read the optional target sets/reps/weight (or duration for aerobic
+                    // exercises) that were entered for this slot
+                    const exerciseConfig = this.getExerciseByName(exerciseName);
+                    const isAerobic = exerciseConfig && exerciseConfig.isAerobic;
+                    if (isAerobic) {
+                        const minutesInput = group.querySelector('.plan-target-duration-minutes');
+                        const secondsInput = group.querySelector('.plan-target-duration-seconds');
+                        const minutes = minutesInput ? (parseInt(minutesInput.value) || 0) : 0;
+                        const seconds = secondsInput ? (parseInt(secondsInput.value) || 0) : 0;
+                        const targetDuration = (minutes * 60) + seconds;
+                        if (targetDuration > 0) slot.targetDuration = targetDuration;
+                    } else {
+                        const setsInput = group.querySelector('.plan-target-sets');
+                        const repsInput = group.querySelector('.plan-target-reps');
+                        const weightInput = group.querySelector('.plan-target-weight');
+                        const targetSets = setsInput ? (parseInt(setsInput.value) || 0) : 0;
+                        const targetReps = repsInput ? (parseInt(repsInput.value) || 0) : 0;
+                        const targetWeight = weightInput ? (parseFloat(weightInput.value) || 0) : 0;
+                        if (targetSets > 0) slot.targetSets = targetSets;
+                        if (targetReps > 0) slot.targetReps = targetReps;
+                        if (targetWeight > 0) slot.targetWeight = targetWeight;
+                    }
+
+                    exerciseSlots.push(slot);
                 }
             }
         });
@@ -3525,16 +3776,19 @@ class WorkoutTracker {
             });
         }
         
+        // Update local cache immediately so the change is reflected right away
+        this.cacheManager.setCachedData('plans', this.workoutPlans);
+
         // Save to Google Sheets
         await this.saveWorkoutPlans();
-        
+
         // Update plan dropdown
         this.updatePlanDropdown();
-        
+
         // Re-render
         this.renderPlanModeTab();
         this.cancelPlanForm();
-        
+
         alert('Plan saved successfully!');
     }
 
@@ -3555,6 +3809,13 @@ class WorkoutTracker {
                 const select = document.querySelector(`.plan-exercise-slot[data-slot="${slot.slotNumber}"]`);
                 if (select) {
                     select.value = slot.exerciseName;
+
+                    // Restore the saved target sets/reps/weight (or duration) for this slot
+                    const group = select.closest('.plan-slot-draggable');
+                    const targetContainer = group ? group.querySelector('.plan-slot-target') : null;
+                    if (targetContainer) {
+                        this.renderPlanSlotTargetFields(targetContainer, slot.exerciseName, slot);
+                    }
                 }
             });
             // Update options to reflect selected exercises
@@ -3581,13 +3842,16 @@ class WorkoutTracker {
         
         // Remove from list
         this.workoutPlans.splice(index, 1);
-        
+
+        // Update local cache immediately so the change is reflected right away
+        this.cacheManager.setCachedData('plans', this.workoutPlans);
+
         // Save to Google Sheets
         await this.saveWorkoutPlans();
-        
+
         // Update plan dropdown
         this.updatePlanDropdown();
-        
+
         // Re-render
         this.renderPlanModeTab();
         
@@ -4458,24 +4722,61 @@ class WorkoutTracker {
         const labelElement = container.parentElement.querySelector('label');
         if (labelElement) {
             if (isAerobic) {
-                labelElement.textContent = 'Duration (H:M:S)';
+                labelElement.textContent = 'Duration';
                 labelElement.querySelector('small')?.remove();
             } else {
                 labelElement.innerHTML = 'Reps and Weight for Each Set <small style="color: #999; font-weight: normal;">(can be different)</small>';
             }
         }
-        
+
         if (isAerobic) {
-            // Show duration input for aerobic exercises
+            // Show duration input for aerobic exercises - plain minutes/seconds fields
+            // plus a quick-pick dropdown built from the configured duration presets
             const group = document.createElement('div');
             group.className = 'rep-input-group';
+            const presetOptions = this.durationPresets.map(minutes =>
+                `<option value="${minutes * 60}">${minutes} min</option>`
+            ).join('');
             group.innerHTML = `
                 <label>Duration:</label>
-                <input type="text" id="exercise-duration" class="exercise-duration-input" placeholder="0:30:00" pattern="[0-9]+:[0-5][0-9]:[0-5][0-9]|[0-9]+:[0-5][0-9]" style="flex: 1;">
-                <small class="help-text" style="display: block; margin-top: 5px; color: #999;">Format: H:M:S or M:S (e.g., 0:30:00 for 30 minutes)</small>
+                <div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
+                    <div style="display: flex; align-items: center; gap: 5px;">
+                        <input type="number" id="exercise-duration-minutes" class="exercise-duration-input" min="0" placeholder="Min" value="0" style="width: 70px; text-align: center;">
+                        <span>min</span>
+                        <input type="number" id="exercise-duration-seconds" class="exercise-duration-input" min="0" max="59" placeholder="Sec" value="0" style="width: 70px; text-align: center;">
+                        <span>sec</span>
+                    </div>
+                    <select id="exercise-duration-preset" class="exercise-duration-input" style="flex: 1; min-width: 140px;">
+                        <option value="">Quick pick...</option>
+                        ${presetOptions}
+                    </select>
+                </div>
+                <input type="hidden" id="exercise-duration">
             `;
             container.appendChild(group);
-            
+
+            const minutesInput = group.querySelector('#exercise-duration-minutes');
+            const secondsInput = group.querySelector('#exercise-duration-seconds');
+            const presetSelect = group.querySelector('#exercise-duration-preset');
+
+            const syncHiddenDuration = () => {
+                const minutes = parseInt(minutesInput.value) || 0;
+                const seconds = parseInt(secondsInput.value) || 0;
+                document.getElementById('exercise-duration').value = `${minutes}:${seconds.toString().padStart(2, '0')}`;
+            };
+
+            minutesInput.addEventListener('input', syncHiddenDuration);
+            secondsInput.addEventListener('input', syncHiddenDuration);
+            presetSelect.addEventListener('change', () => {
+                if (!presetSelect.value) return;
+                const totalSeconds = parseInt(presetSelect.value);
+                minutesInput.value = Math.floor(totalSeconds / 60);
+                secondsInput.value = totalSeconds % 60;
+                syncHiddenDuration();
+            });
+
+            syncHiddenDuration();
+
             // Hide sets input for aerobic exercises
             const setsInput = document.getElementById('sets');
             if (setsInput && setsInput.parentElement) {
@@ -4600,13 +4901,15 @@ class WorkoutTracker {
 
         let exercise;
         if (isAerobic) {
-            // Handle aerobic exercise - get duration
-            const durationInput = document.getElementById('exercise-duration');
-            const durationStr = durationInput ? durationInput.value.trim() : '';
-            const durationSeconds = durationStr ? this.parseExerciseDuration(durationStr) : null;
-            
-            if (!durationSeconds && durationSeconds !== 0) {
-                alert('Please enter a valid duration (H:M:S or M:S format)');
+            // Handle aerobic exercise - get duration from the minutes/seconds inputs
+            const durationMinutesInput = document.getElementById('exercise-duration-minutes');
+            const durationSecondsInput = document.getElementById('exercise-duration-seconds');
+            const durationMinutes = durationMinutesInput ? (parseInt(durationMinutesInput.value) || 0) : 0;
+            const durationSecondsPart = durationSecondsInput ? (parseInt(durationSecondsInput.value) || 0) : 0;
+            const durationSeconds = (durationMinutes * 60) + durationSecondsPart;
+
+            if (durationSeconds <= 0) {
+                alert('Please enter a duration greater than 0');
                 return;
             }
 
@@ -4940,14 +5243,25 @@ class WorkoutTracker {
         });
 
         const container = document.getElementById('recommendations-content');
-        
+
+        // If the active plan sets a target for this exercise, surface it and (when there's
+        // no history to pre-fill from) use it as the starting point for the form instead
+        const planSlot = this.getActivePlanSlotForExercise(exerciseName);
+        const planTarget = planSlot ? this.formatPlanSlotTarget(planSlot) : '';
+        const planTargetHtml = planTarget ? `<p class="suggestion">🎯 Plan target: ${planTarget}</p>` : '';
+
         if (allExercises.length === 0) {
             container.innerHTML = `<div class="recommendation-item">
                 <h4>${exerciseName}</h4>
                 <p class="no-data">No previous sessions found for this exercise</p>
+                ${planTargetHtml}
             </div>`;
-            // Clear form fields if no previous data
-            this.clearFormFields();
+            if (planTarget) {
+                this.applyPlanTargetToForm(planSlot);
+            } else {
+                // Clear form fields if no previous data and no plan target
+                this.clearFormFields();
+            }
             return;
         }
 
@@ -5003,6 +5317,7 @@ class WorkoutTracker {
             html += `<p class="suggestion">💙 Complete one more session to get recommendations</p>`;
         }
 
+        html += planTargetHtml;
         html += '</div>';
         container.innerHTML = html;
     }
@@ -5012,9 +5327,12 @@ class WorkoutTracker {
         if (lastExercise.isAerobic && lastExercise.duration !== undefined) {
             // Handle aerobic exercise - populate duration
             this.updateRepsInputs(); // This will show duration input for aerobic exercises
-            const durationInput = document.getElementById('exercise-duration');
-            if (durationInput) {
-                durationInput.value = this.formatExerciseDuration(lastExercise.duration);
+            const durationMinutesInput = document.getElementById('exercise-duration-minutes');
+            const durationSecondsInput = document.getElementById('exercise-duration-seconds');
+            if (durationMinutesInput && durationSecondsInput) {
+                durationMinutesInput.value = Math.floor(lastExercise.duration / 60);
+                durationSecondsInput.value = lastExercise.duration % 60;
+                durationMinutesInput.dispatchEvent(new Event('input'));
             }
         } else {
             // Handle non-aerobic exercise - populate reps and weights
@@ -5197,6 +5515,14 @@ class WorkoutTracker {
         // Check if exercise was completed twice with identical parameters
         const first = lastTwo[0];
         const second = lastTwo[1];
+
+        // How long ago was this exercise actually last performed (as of today)?
+        // If `first` is today's just-saved entry, the relevant "last time" is `second`;
+        // otherwise (not saved yet) `first` itself is the last time it was done.
+        const todayStr = new Date().toISOString().split('T')[0];
+        const priorEntry = first.date === todayStr ? second : first;
+        const daysSinceLastExercise = Math.floor((new Date() - new Date(priorEntry.date)) / (1000 * 60 * 60 * 24));
+        const weekOrMorePassed = daysSinceLastExercise >= 7;
         const firstWeights = first.weights || (first.weight ? Array(first.reps.length).fill(first.weight) : []);
         const secondWeights = second.weights || (second.weight ? Array(second.reps.length).fill(second.weight) : []);
         const completedTwice = 
@@ -5259,6 +5585,15 @@ class WorkoutTracker {
                     text: `Decrease reps by 1-2 per set`
                 };
             }
+        }
+
+        // If a week or more has passed since this exercise was last performed, don't
+        // encourage raising the weight/reps - suggest easing back in at the old level instead
+        if (weekOrMorePassed && suggestion.action === 'increase') {
+            suggestion = {
+                action: 'maintain',
+                text: `It's been ${daysSinceLastExercise} days since you last did this - ease back in at your previous weight/reps before increasing`
+            };
         }
 
         return { lastTwo, suggestion, completedTwice };
@@ -6133,19 +6468,23 @@ class WorkoutTracker {
         const cachedExerciseList = this.cacheManager.getCachedData('exercises');
         if (cachedExerciseList) {
             this.exerciseList = cachedExerciseList;
-            
-            // Refresh from sheet in background
-            this.loadExerciseListFromSheet().then(sheetExercises => {
-                if (sheetExercises) {
-                    this.exerciseList = sheetExercises;
-                    this.cacheManager.setCachedData('exercises', this.exerciseList);
-                    // Update UI if data changed
-                    this.updateExerciseList(true);
-                }
-            }).catch(error => {
-                console.warn('Background exercise refresh failed:', error);
-            });
-            
+
+            // While a session is active, the phone is the source of truth - don't let a
+            // background sheet fetch race with local edits and overwrite them.
+            if (!this.sessionActive) {
+                // Refresh from sheet in background
+                this.loadExerciseListFromSheet().then(sheetExercises => {
+                    if (sheetExercises && !this.sessionActive) {
+                        this.exerciseList = sheetExercises;
+                        this.cacheManager.setCachedData('exercises', this.exerciseList);
+                        // Update UI if data changed
+                        this.updateExerciseList(true);
+                    }
+                }).catch(error => {
+                    console.warn('Background exercise refresh failed:', error);
+                });
+            }
+
             return this.exerciseList;
         }
 
@@ -6359,19 +6698,23 @@ class WorkoutTracker {
         const cachedWorkoutPlans = this.cacheManager.getCachedData('plans');
         if (cachedWorkoutPlans) {
             this.workoutPlans = cachedWorkoutPlans;
-            
-            // Refresh from sheet in background
-            this.loadWorkoutPlansFromSheet().then(sheetPlans => {
-                if (sheetPlans) {
-                    this.workoutPlans = sheetPlans;
-                    this.cacheManager.setCachedData('plans', this.workoutPlans);
-                    // Update UI if data changed
-                    this.updatePlanDropdown();
-                }
-            }).catch(error => {
-                console.warn('Background plans refresh failed:', error);
-            });
-            
+
+            // While a session is active, the phone is the source of truth - don't let a
+            // background sheet fetch race with local edits and overwrite them.
+            if (!this.sessionActive) {
+                // Refresh from sheet in background
+                this.loadWorkoutPlansFromSheet().then(sheetPlans => {
+                    if (sheetPlans && !this.sessionActive) {
+                        this.workoutPlans = sheetPlans;
+                        this.cacheManager.setCachedData('plans', this.workoutPlans);
+                        // Update UI if data changed
+                        this.updatePlanDropdown();
+                    }
+                }).catch(error => {
+                    console.warn('Background plans refresh failed:', error);
+                });
+            }
+
             return this.workoutPlans;
         }
 
@@ -8264,7 +8607,12 @@ class WorkoutTracker {
             alert('Please sign in first');
             return;
         }
-        
+
+        if (this.sessionActive) {
+            alert('A workout session is in progress, so your phone is the source of truth right now. End the session first, then refresh from Google Sheets.');
+            return;
+        }
+
         // Confirm with user
         const confirmed = confirm(
             'This will delete all local data and reload everything from your Google Sheet.\n\n' +
@@ -8441,20 +8789,24 @@ class WorkoutTracker {
         const cachedSessions = this.cacheManager.getCachedData('sessions');
         if (cachedSessions) {
             this.sessions = cachedSessions;
-            
-            // Refresh from sheet in background
-            this.loadSessionsFromSheet().then(sheetSessions => {
-                if (sheetSessions) {
-                    this.sessions = sheetSessions;
-                    this.cacheManager.setCachedData('sessions', this.sessions);
-                    // Update UI if data changed
-                    this.renderTodayWorkout();
-                    this.renderHistory();
-                }
-            }).catch(error => {
-                console.warn('Background session refresh failed:', error);
-            });
-            
+
+            // While a session is active, the phone is the source of truth - don't let a
+            // background sheet fetch race with local edits and overwrite them.
+            if (!this.sessionActive) {
+                // Refresh from sheet in background
+                this.loadSessionsFromSheet().then(sheetSessions => {
+                    if (sheetSessions && !this.sessionActive) {
+                        this.sessions = sheetSessions;
+                        this.cacheManager.setCachedData('sessions', this.sessions);
+                        // Update UI if data changed
+                        this.renderTodayWorkout();
+                        this.renderHistory();
+                    }
+                }).catch(error => {
+                    console.warn('Background session refresh failed:', error);
+                });
+            }
+
             return this.sessions;
         }
 
@@ -8829,13 +9181,18 @@ class WorkoutTracker {
             await this.initGoogleSheets();
             await this.syncToSheet(true); // Silent sync (no alert)
 
-            // Reload exercise list from sheet to repopulate all exercises
+            // Mark session as inactive BEFORE pulling fresh data - Google Sheets (drive)
+            // becomes the source of truth again now that the session has ended, so these
+            // reloads are allowed to overwrite local state with whatever is on the sheet.
+            this.sessionActive = false;
+
+            // Reload exercise list and plans from the sheet to pick up anything that may
+            // have changed elsewhere (e.g. another device) while the phone was authoritative
             this.exerciseList = await this.loadExerciseList();
             this.updateExerciseList();
+            this.workoutPlans = await this.loadWorkoutPlans();
+            this.updatePlanDropdown();
 
-            // Mark session as inactive and update button
-            this.sessionActive = false;
-            
             // Clear completed plan exercises when session ends (plan can be reused)
             this.completedPlanExercises = [];
             

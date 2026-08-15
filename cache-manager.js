@@ -219,8 +219,10 @@ class CacheManager {
         try {
             this.syncInProgress = true;
             
-            // Only sync if we have authentication
-            if (window.workoutTracker && window.workoutTracker.isSignedIn) {
+            // Only sync if we have authentication, and never while a workout session is
+            // active - during a session the phone is the source of truth, so pulling from
+            // Google Sheets in the background could clobber local, not-yet-synced changes.
+            if (window.workoutTracker && window.workoutTracker.isSignedIn && !window.workoutTracker.sessionActive) {
                 await this.refreshCacheFromServer();
                 this.lastSyncTime = Date.now();
             }
