@@ -21,11 +21,27 @@
     <!-- Enhanced Cache and Auth Managers -->
     <script src="cache-manager.js"></script>
     <script src="auth-manager.js"></script>
+
+    <script>
+        (function() {
+        const savedTheme = localStorage.getItem('theme');
+        const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+        const theme = savedTheme || (prefersDark ? 'dark' : 'light');
+        document.documentElement.setAttribute('data-theme', theme);
+    })();
+    </script>
 </head>
 <body>
     <div class="container">
+        <div class="theme-switch-wrapper">
+            <label class="theme-switch">
+                <input type="checkbox" id="themeToggle">
+                <span class="slider"></span>
+            </label>
+        </div>
         <header>
-            <h1>💪 Workout Tracker</h1>
+            
+            <h1>🏋🏽‍♀️ Workout Tracker</h1>
             <div class="sync-status" id="sync-status">
                 <span id="sync-indicator">⚪</span>
                 <span id="sync-text">Not Connected</span>
@@ -37,15 +53,15 @@
                 </div>
             </div>
             <div class="nav-tabs">
-                <button class="tab-btn active" data-tab="track">Track Workout</button>
-                <button class="tab-btn" data-tab="history">History & Graphs</button>
-                <button class="tab-btn" data-tab="config">Configuration</button>
+                <button class="tab-btn active" data-tab="track">Workout</button>
+                <button class="tab-btn" data-tab="history">History</button>
+                <button class="tab-btn" data-tab="config">⚙️ Settings</button>
                 <button class="tab-btn" data-tab="plan">Plan Mode</button>
-                <button class="tab-btn" data-tab="followers">My Plan Followers</button>
+                <button class="tab-btn" data-tab="followers">Followers</button>
             </div>
         </header>
 
-        <!-- App Purpose Section (always visible) -->
+        <!-- App Purpose Section -->
         <div id="app-purpose-section" class="app-purpose-section" style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 30px; margin: 20px 0; border-radius: 10px; box-shadow: 0 4px 6px rgba(0,0,0,0.1);">
             <h2 style="margin-top: 0; margin-bottom: 20px; font-size: 28px; font-weight: 700;">Application Purpose</h2>
             <p style="font-size: 20px; line-height: 1.8; margin-bottom: 25px; font-weight: 600; background: rgba(255, 255, 255, 0.2); padding: 20px; border-radius: 8px; border-left: 4px solid white;">
@@ -108,8 +124,8 @@
                 </div>
 
                 <div class="form-group">
-                    <label for="sets">Sets</label>
-                    <input type="number" id="sets" placeholder="3" min="1" max="10" value="3">
+                        <label for="sets">Sets</label>
+                    <input type="number" id="sets" placeholder="3" min="1" max="10" value="3" inputmode="numeric" onfocus="this.select()" onclick="this.select()">
                 </div>
 
                 <div class="form-group">
@@ -276,13 +292,13 @@
 
     </div>
 
-    <footer style="text-align: center; padding: 20px; color: #666; font-size: 12px; border-top: 1px solid #e0e0e0; margin-top: 20px;">
+    <footer style="text-align: center; padding: 20px; color: #666; font-size: 12px; margin-top: 20px;">
         <p style="margin-bottom: 8px;">
-            <a href="privacy-policy.html" style="color: #667eea; text-decoration: none; margin: 0 10px;">Privacy Policy</a>
+            <a href="privacy-policy.html" style="text-decoration: none; margin: 0 10px;">Privacy Policy</a>
             <span style="color: #ccc;">|</span>
-            <a href="terms-of-service.html" style="color: #667eea; text-decoration: none; margin: 0 10px;">Terms of Service</a>
+            <a href="terms-of-service.html" style="text-decoration: none; margin: 0 10px;">Terms of Service</a>
         </p>
-        <p style="color: #999; margin: 0;">© 2024 Workout Tracker</p>
+        <p style="margin: 0;">© 2026 Workout Tracker</p>
     </footer>
 
     <!-- Victory Modal -->

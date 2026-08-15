@@ -1166,18 +1166,18 @@ class WorkoutTracker {
 
     updateHeaderButtons() {
         // Show purpose section only when not fully connected (hide when connected to sheet and data loaded)
-        const purposeSection = document.getElementById('app-purpose-section');
-        if (purposeSection) {
-            // Only hide when fully connected: signed in, has sheet ID, and data is loaded
-            const isFullyConnected = this.isSignedIn && this.sheetId && this.dataLoaded;
-            if (isFullyConnected) {
-                purposeSection.style.display = 'none';
-            } else {
-                // Explicitly show it when not fully connected
-                purposeSection.style.display = 'block';
-                purposeSection.style.visibility = 'visible';
-            }
-        }
+        // const purposeSection = document.getElementById('app-purpose-section');
+        // if (purposeSection) {
+        //     // Only hide when fully connected: signed in, has sheet ID, and data is loaded
+        //     const isFullyConnected = this.isSignedIn && this.sheetId && this.dataLoaded;
+        //     if (isFullyConnected) {
+        //         purposeSection.style.display = 'none';
+        //     } else {
+        //         // Explicitly show it when not fully connected
+        //         purposeSection.style.display = 'block';
+        //         purposeSection.style.visibility = 'visible';
+        //     }
+        // }
         
         // Update welcome message visibility
         if (!this.isSignedIn) {
@@ -1478,7 +1478,7 @@ class WorkoutTracker {
         // Settings tab removed - all data is cloud-based
         // Settings tab removed - all data is cloud-based
         document.getElementById('session-btn').addEventListener('click', () => this.handleSessionButton());
-        
+
         // Start session button in track tab
         const startSessionBtn = document.getElementById('start-session-btn');
         if (startSessionBtn) {
@@ -1488,6 +1488,21 @@ class WorkoutTracker {
                 } else {
                     await this.startSession();
                 }
+            });
+        }
+        
+        // Theme toggle
+        const themeToggle = document.getElementById('themeToggle');
+        if (themeToggle) {
+            // Sync slider position with current theme
+            const currentTheme = document.documentElement.getAttribute('data-theme');
+            themeToggle.checked = (currentTheme === 'dark');
+            
+            // Handle toggle changes
+            themeToggle.addEventListener('change', function() {
+                const newTheme = this.checked ? 'dark' : 'light';
+                document.documentElement.setAttribute('data-theme', newTheme);
+                localStorage.setItem('theme', newTheme);
             });
         }
         
@@ -4806,9 +4821,9 @@ class WorkoutTracker {
                 group.innerHTML = `
                     <label>Set ${i}:</label>
                     <div style="display: flex; gap: 10px; align-items: center;">
-                        <input type="number" class="rep-input" data-set="${i}" placeholder="Reps" min="0" value="${repValue}" style="width: 80px;">
+                        <input type="number" class="rep-input" data-set="${i}" placeholder="Reps" min="0" value="${repValue}" inputmode="numeric" onfocus="this.select()" onclick="this.select()">
                         <span>×</span>
-                        <input type="number" class="weight-input" data-set="${i}" placeholder="Weight (kg)" min="0" step="0.5" value="${weightValue}" style="width: 100px;">
+                        <input type="number" class="weight-input" data-set="${i}" placeholder="Weight (kg)" min="0" step="0.5" value="${weightValue}" inputmode="numeric" onfocus="this.select()" onclick="this.select()">
                     </div>
                 `;
                 container.appendChild(group);
@@ -9229,12 +9244,12 @@ class WorkoutTracker {
 
         if (this.sessionActive) {
             sessionBtn.textContent = 'End Session';
-            sessionBtn.style.background = 'rgba(244, 67, 54, 0.9)';
-            sessionBtn.style.borderColor = 'rgba(244, 67, 54, 1)';
+            sessionBtn.classList.add('session-active');
+            sessionBtn.classList.remove('session-inactive');
         } else {
             sessionBtn.textContent = 'New Session';
-            sessionBtn.style.background = 'rgba(255, 255, 255, 0.2)';
-            sessionBtn.style.borderColor = 'rgba(255, 255, 255, 0.3)';
+            sessionBtn.classList.add('session-inactive');
+            sessionBtn.classList.remove('session-active');
         }
         
         // Also update the start session button in track tab
@@ -9249,8 +9264,7 @@ class WorkoutTracker {
         
         if (this.sessionActive) {
             startSessionBtn.textContent = 'End Session';
-            startSessionBtn.style.background = 'rgba(244, 67, 54, 0.9)';
-            startSessionBtn.style.borderColor = 'rgba(244, 67, 54, 1)';
+            startSessionBtn.classList.add('session-active');
             if (saveWorkoutBtn) {
                 saveWorkoutBtn.style.display = 'inline-block';
             }
@@ -9259,8 +9273,7 @@ class WorkoutTracker {
             }
         } else {
             startSessionBtn.textContent = 'Start Session';
-            startSessionBtn.style.background = '';
-            startSessionBtn.style.borderColor = '';
+            startSessionBtn.classList.remove('session-active');
             if (saveWorkoutBtn) {
                 saveWorkoutBtn.style.display = 'none';
             }
