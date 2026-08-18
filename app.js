@@ -3553,7 +3553,7 @@ class WorkoutTracker {
                 <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
                     <input type="number" class="plan-target-sets exercise-duration-input" min="1" placeholder="Sets" value="${sets}" style="width: 65px; text-align: center;">
                     <span>sets ×</span>
-                    <input type="number" class="plan-target-reps exercise-duration-input" min="0" placeholder="Reps" value="${reps}" style="width: 65px; text-align: center;">
+                    <input type="number" class="plan-target-reps exercise-duration-input" min="0" step="0.5" placeholder="Reps" value="${reps}" style="width: 65px; text-align: center;">
                     <span>reps @</span>
                     <input type="number" class="plan-target-weight exercise-duration-input" min="0" step="0.5" placeholder="Weight" value="${weight}" style="width: 75px; text-align: center;">
                     <span>kg</span>
@@ -3746,7 +3746,7 @@ class WorkoutTracker {
                         const repsInput = group.querySelector('.plan-target-reps');
                         const weightInput = group.querySelector('.plan-target-weight');
                         const targetSets = setsInput ? (parseInt(setsInput.value) || 0) : 0;
-                        const targetReps = repsInput ? (parseInt(repsInput.value) || 0) : 0;
+                        const targetReps = repsInput ? (parseFloat(repsInput.value) || 0) : 0;
                         const targetWeight = weightInput ? (parseFloat(weightInput.value) || 0) : 0;
                         if (targetSets > 0) slot.targetSets = targetSets;
                         if (targetReps > 0) slot.targetReps = targetReps;
@@ -4716,7 +4716,7 @@ class WorkoutTracker {
             const existingWeightInputs = container.querySelectorAll('.weight-input');
             
             existingRepInputs.forEach(input => {
-                const value = parseInt(input.value) || 0;
+                const value = parseFloat(input.value) || 0;
                 savedReps.push(value);
             });
             
@@ -4816,7 +4816,7 @@ class WorkoutTracker {
                 group.innerHTML = `
                     <label>Set ${i}:</label>
                     <div style="display: flex; gap: 10px; align-items: center;">
-                        <input type="number" class="rep-input" data-set="${i}" placeholder="Reps" min="0" value="${repValue}" inputmode="numeric" onfocus="this.select()" onclick="this.select()">
+                        <input type="number" class="rep-input" data-set="${i}" placeholder="Reps" min="0" step="0.5" value="${repValue}" inputmode="decimal" onfocus="this.select()" onclick="this.select()">
                         <span>×</span>
                         <input type="number" class="weight-input" data-set="${i}" placeholder="Weight (kg)" min="0" step="0.5" value="${weightValue}" inputmode="numeric" onfocus="this.select()" onclick="this.select()">
                     </div>
@@ -4937,7 +4937,7 @@ class WorkoutTracker {
         const reps = [];
         const weights = [];
         document.querySelectorAll('.rep-input').forEach(input => {
-            reps.push(parseInt(input.value) || 0);
+            reps.push(parseFloat(input.value) || 0);
         });
         document.querySelectorAll('.weight-input').forEach(input => {
             weights.push(parseFloat(input.value) || 0);
@@ -7961,7 +7961,7 @@ class WorkoutTracker {
                         });
                         
                         // Parse comma-separated values
-                        const repsArray = repsStr.split(',').map(r => parseInt(r.trim()) || 0);
+                        const repsArray = repsStr.split(',').map(r => parseFloat(r.trim()) || 0);
                         const weightsArray = weightsStr.split(',').map(w => parseFloat(w.trim()) || 0);
                         
                         console.log('Parsed arrays:', {
@@ -8004,7 +8004,7 @@ class WorkoutTracker {
                         weight = parseFloat(row[2]) || 0;
                         const sets = parseInt(row[3]) || 1;
                         const repsStr = row[4] ? row[4].toString() : '';
-                        let repsArray = repsStr.split('+').map(r => parseInt(r.trim()) || 0).filter(r => r > 0);
+                        let repsArray = repsStr.split('+').map(r => parseFloat(r.trim()) || 0).filter(r => r > 0);
                         
                         // If repsArray has fewer values than sets, repeat the last rep value
                         // This handles cases where old format had "5" for 2 sets (should be "5+5")
@@ -8049,7 +8049,7 @@ class WorkoutTracker {
                     } else {
                         // Previous format: Date, Exercise, Set, Reps, Weight (kg), Difficulty, Notes (one row per set)
                         setNum = parseInt(row[2]) || 1;
-                        reps = parseInt(row[3]) || 0;
+                        reps = parseFloat(row[3]) || 0;
                         weight = parseFloat(row[4]) || 0;
                         difficulty = this.parseDifficulty(row[5] || 'medium');
                         notes = (row[6] || '').trim();
@@ -8885,7 +8885,7 @@ class WorkoutTracker {
                     const notes = (row[6] || '').trim();
                     
                     // Parse comma-separated values
-                    const repsArray = repsStr.split(',').map(r => parseInt(r.trim()) || 0);
+                    const repsArray = repsStr.split(',').map(r => parseFloat(r.trim()) || 0);
                     const weightsArray = weightsStr.split(',').map(w => parseFloat(w.trim()) || 0);
                     
                     const exercise = {
