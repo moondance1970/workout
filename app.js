@@ -4010,6 +4010,10 @@ class WorkoutTracker {
         plan.exerciseSlots.forEach((slot, index) => {
             const exercise = normalizedList.find(ex => ex.name === slot.exerciseName);
             message += `${index + 1}. ${slot.exerciseName}\n`;
+            const target = this.formatPlanSlotTarget(slot);
+            if (target) {
+                message += `   - Target: ${target}\n`;
+            }
             if (exercise) {
                 if (exercise.timerDuration) {
                     message += `   - Rest Timer: ${this.formatRestTimer(exercise.timerDuration)}\n`;
@@ -4155,6 +4159,10 @@ class WorkoutTracker {
                 plan.exerciseSlots.forEach((slot, index) => {
                     const exercise = normalizedList.find(ex => ex.name === slot.exerciseName);
                     emailBody += `${index + 1}. ${slot.exerciseName}\n`;
+                    const target = this.formatPlanSlotTarget(slot);
+                    if (target) {
+                        emailBody += `   - Target: ${target}\n`;
+                    }
                     if (exercise) {
                         if (exercise.timerDuration) {
                             emailBody += `   - Rest Timer: ${this.formatRestTimer(exercise.timerDuration)}\n`;
