@@ -3553,9 +3553,9 @@ class WorkoutTracker {
                 <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
                     <input type="number" class="plan-target-sets exercise-duration-input" min="1" placeholder="Sets" value="${sets}" style="width: 65px; text-align: center;">
                     <span>sets ×</span>
-                    <input type="number" class="plan-target-reps exercise-duration-input" min="0" step="0.5" placeholder="Reps" value="${reps}" style="width: 65px; text-align: center;">
+                    <input type="number" class="plan-target-reps exercise-duration-input" min="0" step="0.5" inputmode="decimal" placeholder="Reps" value="${reps}" style="width: 65px; text-align: center;">
                     <span>reps @</span>
-                    <input type="number" class="plan-target-weight exercise-duration-input" min="0" step="0.5" placeholder="Weight" value="${weight}" style="width: 75px; text-align: center;">
+                    <input type="number" class="plan-target-weight exercise-duration-input" min="0" step="0.5" inputmode="decimal" placeholder="Weight" value="${weight}" style="width: 75px; text-align: center;">
                     <span>kg</span>
                 </div>
             `;
@@ -4818,7 +4818,7 @@ class WorkoutTracker {
                     <div style="display: flex; gap: 10px; align-items: center;">
                         <input type="number" class="rep-input" data-set="${i}" placeholder="Reps" min="0" step="0.5" value="${repValue}" inputmode="decimal" onfocus="this.select()" onclick="this.select()">
                         <span>×</span>
-                        <input type="number" class="weight-input" data-set="${i}" placeholder="Weight (kg)" min="0" step="0.5" value="${weightValue}" inputmode="numeric" onfocus="this.select()" onclick="this.select()">
+                        <input type="number" class="weight-input" data-set="${i}" placeholder="Weight (kg)" min="0" step="0.5" value="${weightValue}" inputmode="decimal" onfocus="this.select()" onclick="this.select()">
                     </div>
                 `;
                 container.appendChild(group);
