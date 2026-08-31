@@ -1,9 +1,73 @@
 import { test, expect } from '@playwright/test';
 
+// Mocks Google APIs, signs the page in, and adds each named exercise via the
+// Configuration tab's "+ Add New Exercise" modal. Leaves the page on the plan tab.
+async function signInWithExercises(page, exerciseNames) {
+  await page.addInitScript(() => {
+    window.google = {
+      accounts: {
+        oauth2: { initTokenClient: () => ({ requestAccessToken: () => {} }) },
+        id: { initialize: () => {}, renderButton: () => {} }
+      },
+      client: {
+        init: () => {},
+        load: () => Promise.resolve(),
+        setToken: () => {},
+        sheets: {
+          spreadsheets: {
+            values: {
+              get: () => Promise.resolve({ result: { values: [] } }),
+              update: () => Promise.resolve({ result: { updatedCells: 1 } }),
+              batchUpdate: () => Promise.resolve({ result: { updatedSpreadsheet: {} } })
+            },
+            get: () => Promise.resolve({
+              result: {
+                sheets: [{ properties: { title: 'Plans' } }],
+                spreadsheetId: 'test-sheet-id'
+              }
+            })
+          }
+        },
+        drive: { permissions: { create: () => Promise.resolve({ result: { id: 'perm-123' } }) } }
+      }
+    };
+  });
+
+  await page.evaluate(() => {
+    localStorage.setItem('googleAccessToken', 'test-token');
+    localStorage.setItem('googleTokenExpiry', new Date(Date.now() + 3600000).toISOString());
+    localStorage.setItem('userEmail', 'test@example.com');
+    localStorage.setItem('staticSheetId', 'test-sheet-id');
+  });
+
+  page.on('dialog', async dialog => {
+    await dialog.accept();
+  });
+
+  await page.click('button[data-tab="config"]');
+  await page.waitForTimeout(100);
+
+  for (const name of exerciseNames) {
+    await page.click('#add-exercise-config');
+    await page.waitForSelector('#add-exercise-name', { state: 'visible' });
+    await page.fill('#add-exercise-name', name);
+    await page.click('#add-exercise-save-btn');
+    try {
+      await page.waitForSelector('#add-exercise-save-btn', { state: 'hidden', timeout: 3000 });
+    } catch (e) {
+      // Modal might have closed differently, continue anyway
+    }
+    await page.waitForTimeout(200);
+  }
+
+  await page.click('button[data-tab="plan"]');
+  await page.waitForTimeout(200);
+}
+
 test.describe('Plan Management', () => {
   test.beforeEach(async ({ page }) => {
     await page.goto('/');
-    
+
     // Navigate to plan tab
     await page.click('button[data-tab="plan"]');
   });
@@ -261,5 +325,129 @@ test.describe('Plan Management', () => {
     // Verify the plan link is included
     expect(clipboardContent).toContain('http');
     expect(clipboardContent).toContain('test-sheet-id');
+  });
+
+  test('should add an exercise slot with "+ Add Exercise" without clearing existing selections', async ({ page }) => {
+    test.setTimeout(30000);
+    await signInWithExercises(page, ['Squats', 'Lunges']);
+
+    // Start with one slot and select an exercise in it
+    await page.fill('#plan-slots-count', '1');
+    await page.click('#generate-slots-btn');
+    await page.waitForTimeout(200);
+
+    const firstSelect = page.locator('#plan-exercise-slots select').first();
+    await firstSelect.selectOption('Squats');
+    await page.waitForTimeout(100);
+
+    // Add a second slot via the incremental button
+    await page.click('#add-plan-slot-btn');
+    await page.waitForTimeout(200);
+
+    const slots = page.locator('#plan-exercise-slots select');
+    await expect(slots).toHaveCount(2);
+
+    // The first slot's selection must survive the append
+    await expect(firstSelect).toHaveValue('Squats');
+
+    // The new second slot should be empty and ready to pick from
+    const secondSelect = slots.nth(1);
+    await expect(secondSelect).toHaveValue('');
+    await secondSelect.selectOption('Lunges');
+    await expect(secondSelect).toHaveValue('Lunges');
+
+    // Adding again should append a third slot without disturbing the first two
+    await page.click('#add-plan-slot-btn');
+    await page.waitForTimeout(200);
+    await expect(slots).toHaveCount(3);
+    await expect(firstSelect).toHaveValue('Squats');
+    await expect(secondSelect).toHaveValue('Lunges');
+  });
+
+  test('should remove an individual slot without affecting the others', async ({ page }) => {
+    test.setTimeout(30000);
+    await signInWithExercises(page, ['Squats', 'Lunges']);
+
+    await page.fill('#plan-slots-count', '2');
+    await page.click('#generate-slots-btn');
+    await page.waitForTimeout(200);
+
+    const slots = page.locator('#plan-exercise-slots select');
+    await slots.nth(0).selectOption('Squats');
+    await slots.nth(1).selectOption('Lunges');
+    await page.waitForTimeout(100);
+
+    // Remove the first slot
+    await page.locator('.remove-plan-slot-btn').first().click();
+    await page.waitForTimeout(200);
+
+    await expect(slots).toHaveCount(1);
+    await expect(slots.first()).toHaveValue('Lunges');
+  });
+
+  test('should create a new exercise directly from a plan slot dropdown', async ({ page }) => {
+    test.setTimeout(30000);
+    await signInWithExercises(page, ['Squats']);
+
+    await page.fill('#plan-slots-count', '1');
+    await page.click('#generate-slots-btn');
+    await page.waitForTimeout(200);
+
+    const select = page.locator('#plan-exercise-slots select').first();
+    await expect(select.locator('option', { hasText: '+ Add New Exercise...' })).toHaveCount(1);
+
+    await select.selectOption('__add_new_exercise__');
+
+    // Opens the same add-exercise modal used from the Configuration tab
+    await page.waitForSelector('#add-exercise-name', { state: 'visible' });
+    await page.fill('#add-exercise-name', 'Deadlift');
+    await page.click('#add-exercise-save-btn');
+    await page.waitForTimeout(300);
+
+    // The new exercise should be auto-selected in the slot that triggered it
+    await expect(select).toHaveValue('Deadlift');
+
+    // A second slot should list it as an available option too, once it's not
+    // already taken by the first slot
+    await select.selectOption('Squats');
+    await page.click('#add-plan-slot-btn');
+    await page.waitForTimeout(200);
+    const secondSelect = page.locator('#plan-exercise-slots select').nth(1);
+    await expect(secondSelect.locator('option', { hasText: 'Deadlift' })).toHaveCount(1);
+
+    // And it's genuinely persisted as a real exercise, not just a plan-local label
+    await page.click('button[data-tab="config"]');
+    await page.waitForTimeout(200);
+    await expect(page.locator('.exercise-config-row', { hasText: 'Deadlift' })).toHaveCount(1);
+  });
+
+  test('should show sets/reps/weight target fields for a non-aerobic exercise slot', async ({ page }) => {
+    test.setTimeout(30000);
+    await signInWithExercises(page, ['Squats']);
+
+    await page.fill('#plan-slots-count', '1');
+    await page.click('#generate-slots-btn');
+    await page.waitForTimeout(200);
+
+    const select = page.locator('#plan-exercise-slots select').first();
+    await select.selectOption('Squats');
+    await page.waitForTimeout(100);
+
+    const slot = page.locator('.plan-slot-draggable').first();
+    await expect(slot.locator('.plan-target-sets')).toBeVisible();
+    await expect(slot.locator('.plan-target-reps')).toBeVisible();
+    await expect(slot.locator('.plan-target-weight')).toBeVisible();
+
+    await slot.locator('.plan-target-sets').fill('3');
+    await slot.locator('.plan-target-reps').fill('10');
+    await slot.locator('.plan-target-weight').fill('40');
+
+    await page.fill('#plan-name', 'Leg Day');
+    await page.click('#save-plan-btn');
+    await page.waitForTimeout(500);
+
+    // The target should show up in the plan list
+    const planCard = page.locator('.plan-card', { hasText: 'Leg Day' });
+    await expect(planCard).toContainText('3×10 @ 40kg');
   });
 });

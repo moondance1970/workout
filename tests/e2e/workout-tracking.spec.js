@@ -87,18 +87,52 @@ test.describe('Workout Tracking', () => {
   test('should display today workout section', async ({ page }) => {
     const todayWorkout = page.locator('#today-workout');
     await expect(todayWorkout).toBeVisible();
-    
+
     const todayExercises = page.locator('#today-exercises');
     await expect(todayExercises).toBeVisible();
+    // Default placeholder should render even before any data has loaded
+    await expect(todayExercises).toContainText('No exercises logged today');
   });
 
   test('should show rest timer modal structure', async ({ page }) => {
     const restTimerModal = page.locator('#rest-timer-modal');
     // Check that element exists in DOM (count > 0)
     await expect(restTimerModal).toHaveCount(1);
-    
+
     // Modal should be hidden initially
     const display = await restTimerModal.evaluate(el => window.getComputedStyle(el).display);
     expect(display).toBe('none');
+
+    // Title should default to the rest timer label (it's retitled when the
+    // separate "Exercise Timer" button is used instead - see exercise-timer.spec.js)
+    const title = page.locator('#rest-timer-title');
+    await expect(title).toHaveText('⏱️ Rest Timer');
+  });
+
+  test.describe('Decimal reps', () => {
+    test('should allow entering a half rep (e.g. 8.5)', async ({ page }) => {
+      const sets = page.locator('#sets');
+      await sets.fill('1');
+      await page.waitForTimeout(100);
+
+      const repInput = page.locator('.rep-input').first();
+      await expect(repInput).toBeVisible();
+      await repInput.fill('8.5');
+      await expect(repInput).toHaveValue('8.5');
+    });
+
+    test('should configure rep and weight inputs to accept decimals', async ({ page }) => {
+      const sets = page.locator('#sets');
+      await sets.fill('1');
+      await page.waitForTimeout(100);
+
+      const repInput = page.locator('.rep-input').first();
+      const weightInput = page.locator('.weight-input').first();
+
+      await expect(repInput).toHaveAttribute('step', '0.5');
+      await expect(repInput).toHaveAttribute('inputmode', 'decimal');
+      await expect(weightInput).toHaveAttribute('step', '0.5');
+      await expect(weightInput).toHaveAttribute('inputmode', 'decimal');
+    });
   });
 });

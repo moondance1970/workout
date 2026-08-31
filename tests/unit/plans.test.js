@@ -216,12 +216,86 @@ describe('Workout Plans', () => {
     it('should detect when plan is incomplete', () => {
       const plan = samplePlans[0];
       const completedExercises = ['Bench Press'];
-      
+
       const isComplete = plan.exerciseSlots.every(slot =>
         completedExercises.includes(slot.exerciseName)
       );
-      
+
       expect(isComplete).toBe(false);
+    });
+  });
+
+  describe('Exercise Slot Targets', () => {
+    // Mirrors formatPlanSlotTarget() in app.js
+    const formatDuration = (seconds) => {
+      const hours = Math.floor(seconds / 3600);
+      const mins = Math.floor((seconds % 3600) / 60);
+      const secs = seconds % 60;
+      if (hours > 0) return `${hours}:${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+      return `${mins}:${secs.toString().padStart(2, '0')}`;
+    };
+
+    const formatPlanSlotTarget = (slot, isAerobic = false) => {
+      if (!slot) return '';
+      if (isAerobic) {
+        return slot.targetDuration ? formatDuration(slot.targetDuration) : '';
+      }
+      const parts = [];
+      if (slot.targetSets && slot.targetReps) {
+        parts.push(`${slot.targetSets}×${slot.targetReps}`);
+      } else if (slot.targetSets) {
+        parts.push(`${slot.targetSets} sets`);
+      } else if (slot.targetReps) {
+        parts.push(`${slot.targetReps} reps`);
+      }
+      if (slot.targetWeight) {
+        parts.push(`@ ${slot.targetWeight}kg`);
+      }
+      return parts.join(' ');
+    };
+
+    it('should format sets, reps, and weight together', () => {
+      const slot = { exerciseName: 'Squats', targetSets: 3, targetReps: 10, targetWeight: 40 };
+      expect(formatPlanSlotTarget(slot)).toBe('3×10 @ 40kg');
+    });
+
+    it('should format sets only when reps are not set', () => {
+      const slot = { exerciseName: 'Squats', targetSets: 3 };
+      expect(formatPlanSlotTarget(slot)).toBe('3 sets');
+    });
+
+    it('should format reps only when sets are not set', () => {
+      const slot = { exerciseName: 'Squats', targetReps: 10 };
+      expect(formatPlanSlotTarget(slot)).toBe('10 reps');
+    });
+
+    it('should format weight alone appended to sets/reps', () => {
+      const slot = { exerciseName: 'Squats', targetWeight: 40 };
+      expect(formatPlanSlotTarget(slot)).toBe('@ 40kg');
+    });
+
+    it('should support decimal reps and weight in the target', () => {
+      const slot = { exerciseName: 'Pull-ups', targetSets: 3, targetReps: 8.5, targetWeight: 2.5 };
+      expect(formatPlanSlotTarget(slot)).toBe('3×8.5 @ 2.5kg');
+    });
+
+    it('should format a target duration for aerobic exercises', () => {
+      const slot = { exerciseName: 'Running', targetDuration: 1230 }; // 20:30
+      expect(formatPlanSlotTarget(slot, true)).toBe('20:30');
+    });
+
+    it('should return an empty string when no target is set', () => {
+      const slot = { exerciseName: 'Squats' };
+      expect(formatPlanSlotTarget(slot)).toBe('');
+      expect(formatPlanSlotTarget(null)).toBe('');
+    });
+
+    it('should include a target when sending a plan via WhatsApp/email share text', () => {
+      // Mirrors the "Target: ..." line added to shareViaWhatsApp()/the email share body
+      const slot = { exerciseName: 'Squats', targetSets: 3, targetReps: 10, targetWeight: 40 };
+      const target = formatPlanSlotTarget(slot);
+      const line = target ? `   - Target: ${target}\n` : '';
+      expect(line).toBe('   - Target: 3×10 @ 40kg\n');
     });
   });
 });

@@ -16,32 +16,35 @@ test.describe('Authentication', () => {
     await expect(syncText).toContainText('Not Connected');
   });
 
-  test('should display app purpose section', async ({ page }) => {
+  test('should keep app purpose section in the DOM but permanently hidden', async ({ page }) => {
+    // The app purpose section is retired (CSS-hidden unconditionally, see
+    // styles.css '#app-purpose-section') but its markup is still present.
     const purposeSection = page.locator('#app-purpose-section');
-    await expect(purposeSection).toBeVisible();
-    
+    await expect(purposeSection).toHaveCount(1);
+
+    const display = await purposeSection.evaluate(el => window.getComputedStyle(el).display);
+    expect(display).toBe('none');
+
     const purposeHeading = purposeSection.locator('h2');
     await expect(purposeHeading).toContainText('Application Purpose');
   });
 
-  test('should show app purpose section when not signed in', async ({ page }) => {
+  test('should keep app purpose section hidden when not signed in', async ({ page }) => {
     // Ensure no sign-in state
     await page.evaluate(() => {
       localStorage.removeItem('googleAccessToken');
       localStorage.removeItem('googleTokenExpiry');
     });
-    
+
     await page.reload();
     await page.waitForTimeout(200);
-    
+
     const purposeSection = page.locator('#app-purpose-section');
-    await expect(purposeSection).toBeVisible();
-    
     const display = await purposeSection.evaluate(el => window.getComputedStyle(el).display);
-    expect(display).toBe('block');
+    expect(display).toBe('none');
   });
 
-  test('should show app purpose section when signed in but not connected to sheet', async ({ page }) => {
+  test('should keep app purpose section hidden when signed in but not connected to sheet', async ({ page }) => {
     // Mock Google APIs
     await page.addInitScript(() => {
       window.google = {
@@ -84,29 +87,25 @@ test.describe('Authentication', () => {
     await page.waitForTimeout(500);
     
     const purposeSection = page.locator('#app-purpose-section');
-    // Should still be visible because not fully connected (no sheetId)
-    await expect(purposeSection).toBeVisible();
-    
+    // Retired: always hidden now regardless of connection state
     const display = await purposeSection.evaluate(el => window.getComputedStyle(el).display);
-    expect(display).toBe('block');
+    expect(display).toBe('none');
   });
 
-  test('should show app purpose section when not fully connected', async ({ page }) => {
-    // Test: Not signed in - section should be visible
+  test('should keep app purpose section hidden when not fully connected', async ({ page }) => {
+    // Test: Not signed in - section should stay hidden
     await page.evaluate(() => {
       localStorage.clear();
     });
     await page.reload();
     await page.waitForTimeout(300);
-    
+
     const purposeSection = page.locator('#app-purpose-section');
-    await expect(purposeSection).toBeVisible();
-    
     const display = await purposeSection.evaluate(el => window.getComputedStyle(el).display);
-    expect(display).toBe('block');
+    expect(display).toBe('none');
   });
 
-  test('should show app purpose section when signed in but no sheet connection', async ({ page }) => {
+  test('should keep app purpose section hidden when signed in but no sheet connection', async ({ page }) => {
     // Mock Google APIs
     await page.addInitScript(() => {
       window.google = {
@@ -142,14 +141,12 @@ test.describe('Authentication', () => {
     await page.waitForTimeout(500);
     
     const purposeSection = page.locator('#app-purpose-section');
-    // Should be visible because not fully connected (missing sheetId)
-    await expect(purposeSection).toBeVisible();
-    
+    // Retired: always hidden now regardless of connection state
     const display = await purposeSection.evaluate(el => window.getComputedStyle(el).display);
-    expect(display).toBe('block');
+    expect(display).toBe('none');
   });
 
-  test('should hide app purpose section when fully connected (isSignedIn + sheetId + dataLoaded)', async ({ page }) => {
+  test('should keep app purpose section hidden once fully connected (isSignedIn + sheetId + dataLoaded)', async ({ page }) => {
     // Mock Google APIs to simulate successful data loading
     await page.addInitScript(() => {
       window.google = {
@@ -198,38 +195,23 @@ test.describe('Authentication', () => {
     await page.reload();
     
     const purposeSection = page.locator('#app-purpose-section');
-    const syncText = page.locator('#sync-text');
-    
-    // Wait for the app to fully initialize and load data
-    // The app sets dataLoaded = true after loading all data in init()
-    // We need to wait for that to complete - wait for sync to show "Connected"
-    // OR wait a reasonable time and then verify the condition directly
+
+    // Wait for the app to fully initialize and load data (best-effort - the
+    // hidden assertion below holds either way, see comment below).
     try {
       await page.waitForFunction(() => {
         const syncTextEl = document.getElementById('sync-text');
         return syncTextEl && syncTextEl.textContent === 'Connected';
       }, { timeout: 5000 });
     } catch (e) {
-      // If sync doesn't reach "Connected" (due to incomplete mocks), 
-      // we can still verify the logic by checking if updateHeaderButtons was called
-      // when dataLoaded becomes true. For now, we'll check the actual state.
+      // If sync doesn't reach "Connected" (due to incomplete mocks), continue anyway.
     }
     
-    // Verify the logic: if sync shows "Connected", section must be hidden
-    // This is the key test - it verifies updateHeaderButtons() is called after dataLoaded = true
-    const syncStatus = await syncText.textContent();
+    // Retired: the section is unconditionally hidden now regardless of connection
+    // state, so this holds whether or not sync actually reached "Connected" above.
     const display = await purposeSection.evaluate(el => window.getComputedStyle(el).display);
-    
-    if (syncStatus === 'Connected') {
-      // When fully connected, section MUST be hidden
-      // This is the bug we're testing for - if this fails, updateHeaderButtons wasn't called
-      expect(display).toBe('none');
-    } else {
-      // If not fully connected yet, section should be visible
-      // This is expected behavior during loading
-      expect(display).toBe('block');
-    }
-    
+    expect(display).toBe('none');
+
     // Verify the element exists in DOM
     await expect(purposeSection).toHaveCount(1);
   });

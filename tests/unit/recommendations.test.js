@@ -178,12 +178,72 @@ describe('Recommendations', () => {
     it('should calculate total volume (weight × reps)', () => {
       const exercise = sampleSessions[0].exercises[0];
       let totalVolume = 0;
-      
+
       for (let i = 0; i < exercise.reps.length; i++) {
         totalVolume += exercise.reps[i] * exercise.weights[i];
       }
-      
+
       expect(totalVolume).toBeGreaterThan(0);
+    });
+  });
+
+  describe('Week-gap gating (no "increase" nudge after a long break)', () => {
+    // Mirrors the weekOrMorePassed gate added to getRecommendations() in app.js
+    const daysSince = (dateStr, now = new Date('2026-06-15')) => {
+      return Math.floor((now - new Date(dateStr)) / (1000 * 60 * 60 * 24));
+    };
+
+    const applyWeekGap = (suggestion, daysSinceLastExercise) => {
+      if (daysSinceLastExercise >= 7 && suggestion.action === 'increase') {
+        return {
+          action: 'maintain',
+          text: `It's been ${daysSinceLastExercise} days since you last did this - ease back in at your previous weight/reps before increasing`
+        };
+      }
+      return suggestion;
+    };
+
+    it('should downgrade an "increase" suggestion to "maintain" after 7+ days', () => {
+      const gap = daysSince('2026-06-01'); // 14 days before the reference "now"
+      expect(gap).toBeGreaterThanOrEqual(7);
+
+      const result = applyWeekGap({ action: 'increase', text: 'Try increasing weight' }, gap);
+      expect(result.action).toBe('maintain');
+      expect(result.text).toContain(`${gap} days`);
+    });
+
+    it('should leave an "increase" suggestion alone within a week', () => {
+      const gap = daysSince('2026-06-10'); // 5 days before the reference "now"
+      expect(gap).toBeLessThan(7);
+
+      const result = applyWeekGap({ action: 'increase', text: 'Try increasing weight' }, gap);
+      expect(result.action).toBe('increase');
+    });
+
+    it('should not affect "decrease" or "maintain" suggestions regardless of gap', () => {
+      const longGap = 30;
+      const decrease = applyWeekGap({ action: 'decrease', text: 'Decrease weight' }, longGap);
+      const maintain = applyWeekGap({ action: 'maintain', text: 'Keep current weight' }, longGap);
+
+      expect(decrease.action).toBe('decrease');
+      expect(maintain.action).toBe('maintain');
+    });
+
+    it('should measure the gap from the prior entry, not "now", when today\'s save is already in the history', () => {
+      // Mirrors getRecommendations() picking `second` instead of `first` when
+      // `first` is today's just-saved entry
+      const today = '2026-06-15';
+      const entries = [
+        { date: today, weights: [40], reps: [10] },      // just saved
+        { date: '2026-05-20', weights: [40], reps: [10] } // last real occurrence, 26 days prior
+      ];
+      const sorted = [...entries].sort((a, b) => new Date(b.date) - new Date(a.date));
+      const [first, second] = sorted;
+      const priorEntry = first.date === today ? second : first;
+      const gap = daysSince(priorEntry.date, new Date(today));
+
+      expect(priorEntry.date).toBe('2026-05-20');
+      expect(gap).toBeGreaterThanOrEqual(7);
     });
   });
 });

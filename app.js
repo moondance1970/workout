@@ -3693,6 +3693,11 @@ class WorkoutTracker {
                 // instead, and select the newly created exercise here once it's saved
                 select.value = '';
                 this.showAddExerciseModal((newExerciseName) => {
+                    // The new exercise has no matching <option> yet - setting .value to
+                    // it before rebuilding the option list is silently ignored by the
+                    // browser, so refresh the options first, then select it, then
+                    // refresh again so other slots correctly exclude it.
+                    this.updatePlanSlotOptions();
                     select.value = newExerciseName;
                     this.updatePlanSlotOptions();
                     this.renderPlanSlotTargetFields(targetContainer, newExerciseName);
