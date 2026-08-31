@@ -152,22 +152,34 @@ class WorkoutTracker {
             this.initGoogleSheets();
             
             // Ensure UI is up to date (loadUserInfo/autoConnectSheet should have already done this)
-            // But do a final check to make sure data is loaded
+            // But do a final check to make sure data is loaded.
+            // Each of these re-checks "still empty?" AFTER the await, not just before -
+            // otherwise this slow background load can finish after the user has already
+            // added something through the UI (e.g. a new exercise) and blindly wipe it out.
             if (!this.sessions || this.sessions.length === 0) {
                 console.log('No sessions after autoConnect, attempting to load...');
-                this.sessions = await this.loadSessions();
-                this.currentSession = this.getTodaySession();
-                this.renderTodayWorkout();
+                const loadedSessions = await this.loadSessions();
+                if (!this.sessions || this.sessions.length === 0) {
+                    this.sessions = loadedSessions;
+                    this.currentSession = this.getTodaySession();
+                    this.renderTodayWorkout();
+                }
             }
-            
+
             // Ensure all data is loaded
             if (!this.exerciseList || this.exerciseList.length === 0) {
-                this.exerciseList = await this.loadExerciseList();
-                this.updateExerciseList();
+                const loadedExerciseList = await this.loadExerciseList();
+                if (!this.exerciseList || this.exerciseList.length === 0) {
+                    this.exerciseList = loadedExerciseList;
+                    this.updateExerciseList();
+                }
             }
-            
+
             if (!this.workoutPlans || this.workoutPlans.length === 0) {
-                this.workoutPlans = await this.loadWorkoutPlans();
+                const loadedWorkoutPlans = await this.loadWorkoutPlans();
+                if (!this.workoutPlans || this.workoutPlans.length === 0) {
+                    this.workoutPlans = loadedWorkoutPlans;
+                }
             }
             
             // All data loaded
