@@ -147,7 +147,7 @@
             <div id="rest-timer-modal" class="rest-timer-modal" style="display: none;">
                 <div class="rest-timer-backdrop"></div>
                 <div class="rest-timer-content">
-                    <h3>⏱️ Rest Timer</h3>
+                    <h3 id="rest-timer-title">⏱️ Rest Timer</h3>
                     <div class="timer-display">
                         <div class="timer-circle">
                             <span id="timer-seconds">60</span>
@@ -278,6 +278,9 @@
                         <button id="generate-slots-btn" class="btn-secondary">Generate Exercise Slots</button>
                     </div>
                     <div id="plan-exercise-slots"></div>
+                    <div class="form-group">
+                        <button id="add-plan-slot-btn" class="btn-secondary">+ Add Exercise</button>
+                    </div>
                     <div class="form-group" style="margin-top: 15px;">
                         <button id="save-plan-btn" class="btn-primary" style="display: none;">Save Plan</button>
                         <button id="cancel-plan-btn" class="btn-secondary" style="display: none; margin-left: 10px;">Cancel</button>

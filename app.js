@@ -2028,19 +2028,22 @@ class WorkoutTracker {
         html += '<div>Rest Timer (M:S)</div>';
         html += '<div>YouTube Link</div>';
         html += '<div>Aerobic</div>';
+        html += '<div>Exercise Timer</div>';
         html += '<div>Actions</div>';
         html += '</div>';
-        
+
         normalizedList.forEach((exercise, index) => {
             const timerStr = exercise.timerDuration ? this.formatRestTimer(exercise.timerDuration) : '';
             const youtubeLink = exercise.youtubeLink || '';
             const isAerobic = exercise.isAerobic ? '✓' : '';
-            
+            const exerciseTimerStr = exercise.exerciseTimer ? this.formatRestTimer(exercise.exerciseTimer) : '-';
+
             html += `<div class="exercise-config-row" data-index="${index}">`;
             html += `<div>${exercise.name}</div>`;
             html += `<div>${timerStr}</div>`;
             html += `<div>${youtubeLink ? `<a href="${youtubeLink}" target="_blank">Link</a>` : '-'}</div>`;
             html += `<div>${isAerobic}</div>`;
+            html += `<div>${exerciseTimerStr}</div>`;
             html += `<div><button class="btn-secondary edit-exercise-config" data-index="${index}" style="padding: 5px 10px; font-size: 12px; margin-right: 5px;">Edit</button><button class="btn-danger delete-exercise-config" data-index="${index}" style="padding: 5px 10px; font-size: 12px;">Delete</button></div>`;
             html += `</div>`;
         });
@@ -2563,7 +2566,10 @@ class WorkoutTracker {
         this.showAddExerciseModal();
     }
 
-    showAddExerciseModal() {
+    // `onCreated` (optional) is called with the new exercise's name once it's been saved -
+    // used by the plan builder to auto-select the newly created exercise in the slot that
+    // triggered it.
+    showAddExerciseModal(onCreated) {
         // Calculate default minutes and seconds from default timer
         const totalSeconds = this.defaultTimer;
         const minutes = Math.floor(totalSeconds / 60);
@@ -2637,15 +2643,85 @@ class WorkoutTracker {
                     <span style="font-weight: 600;">Is Aerobic Exercise</span>
                 </label>
             </div>
+            <div class="form-group" style="margin-bottom: 20px;">
+                <label style="display: flex; align-items: center; gap: 10px; margin-bottom: 10px;">
+                    <input type="checkbox" id="add-exercise-timer-enabled" style="width: 20px; height: 20px;">
+                    <span style="font-weight: 600;">Exercise Timer</span>
+                </label>
+                <small style="color: #666; display: block; margin-bottom: 10px;">Adds a timer button next to reps/weight when logging this exercise - separate from the rest timer between sets</small>
+                <div id="add-exercise-timer-fields" style="display: none; align-items: center; gap: 15px; justify-content: center; margin: 15px 0;">
+                    <div style="display: flex; flex-direction: column; align-items: center; gap: 5px;">
+                        <label style="font-size: 12px; color: #666; margin-bottom: 5px;">Minutes</label>
+                        <div style="display: flex; align-items: center; gap: 5px;">
+                            <button type="button" id="add-extimer-inc-minutes" class="btn-secondary" style="width: 35px; height: 35px; padding: 0; font-size: 18px; border-radius: 5px;">+</button>
+                            <input type="number" id="add-extimer-minutes" min="0" max="59" value="2" style="width: 70px; text-align: center; padding: 8px; font-size: 18px; border: 2px solid #e0e0e0; border-radius: 5px;">
+                            <button type="button" id="add-extimer-dec-minutes" class="btn-secondary" style="width: 35px; height: 35px; padding: 0; font-size: 18px; border-radius: 5px;">−</button>
+                        </div>
+                    </div>
+                    <span style="font-size: 24px; font-weight: bold; color: #667eea; margin-top: 20px;">:</span>
+                    <div style="display: flex; flex-direction: column; align-items: center; gap: 5px;">
+                        <label style="font-size: 12px; color: #666; margin-bottom: 5px;">Seconds</label>
+                        <div style="display: flex; align-items: center; gap: 5px;">
+                            <button type="button" id="add-extimer-inc-seconds" class="btn-secondary" style="width: 35px; height: 35px; padding: 0; font-size: 18px; border-radius: 5px;">+</button>
+                            <input type="number" id="add-extimer-seconds" min="0" max="59" value="0" style="width: 70px; text-align: center; padding: 8px; font-size: 18px; border: 2px solid #e0e0e0; border-radius: 5px;">
+                            <button type="button" id="add-extimer-dec-seconds" class="btn-secondary" style="width: 35px; height: 35px; padding: 0; font-size: 18px; border-radius: 5px;">−</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
             <div style="display: flex; gap: 10px; justify-content: flex-end;">
                 <button id="add-exercise-cancel-btn" class="btn-secondary" style="padding: 10px 20px;">Cancel</button>
                 <button id="add-exercise-save-btn" class="btn-primary" style="padding: 10px 20px;">Add Exercise</button>
             </div>
         `;
-        
+
         modal.appendChild(dialog);
         document.body.appendChild(modal);
-        
+
+        // Toggle exercise-timer duration fields when the checkbox is switched
+        const exTimerCheckbox = document.getElementById('add-exercise-timer-enabled');
+        const exTimerFields = document.getElementById('add-exercise-timer-fields');
+        exTimerCheckbox.addEventListener('change', () => {
+            exTimerFields.style.display = exTimerCheckbox.checked ? 'flex' : 'none';
+        });
+
+        // Setup exercise-timer +/- buttons
+        const exTimerMinutesInput = document.getElementById('add-extimer-minutes');
+        const exTimerSecondsInput = document.getElementById('add-extimer-seconds');
+
+        document.getElementById('add-extimer-dec-minutes').addEventListener('click', () => {
+            const current = parseInt(exTimerMinutesInput.value) || 0;
+            if (current > 0) exTimerMinutesInput.value = current - 1;
+        });
+        document.getElementById('add-extimer-inc-minutes').addEventListener('click', () => {
+            const current = parseInt(exTimerMinutesInput.value) || 0;
+            if (current < 59) exTimerMinutesInput.value = current + 1;
+        });
+        document.getElementById('add-extimer-dec-seconds').addEventListener('click', () => {
+            const current = parseInt(exTimerSecondsInput.value) || 0;
+            if (current > 0) {
+                exTimerSecondsInput.value = current - 1;
+            } else if (current === 0) {
+                const mins = parseInt(exTimerMinutesInput.value) || 0;
+                if (mins > 0) {
+                    exTimerMinutesInput.value = mins - 1;
+                    exTimerSecondsInput.value = 59;
+                }
+            }
+        });
+        document.getElementById('add-extimer-inc-seconds').addEventListener('click', () => {
+            const current = parseInt(exTimerSecondsInput.value) || 0;
+            if (current < 59) {
+                exTimerSecondsInput.value = current + 1;
+            } else {
+                const mins = parseInt(exTimerMinutesInput.value) || 0;
+                if (mins < 59) {
+                    exTimerMinutesInput.value = mins + 1;
+                    exTimerSecondsInput.value = 0;
+                }
+            }
+        });
+
         // Setup timer +/- buttons
         const minutesInput = document.getElementById('add-timer-minutes');
         const secondsInput = document.getElementById('add-timer-seconds');
@@ -2697,7 +2773,7 @@ class WorkoutTracker {
         
         // Handle Add button
         document.getElementById('add-exercise-save-btn').addEventListener('click', async () => {
-            await this.saveExerciseFromModal(modal);
+            await this.saveExerciseFromModal(modal, onCreated);
         });
         
         // Close on backdrop click
@@ -2713,44 +2789,58 @@ class WorkoutTracker {
         }, 100);
     }
 
-    async saveExerciseFromModal(modal) {
+    async saveExerciseFromModal(modal, onCreated) {
         const nameInput = document.getElementById('add-exercise-name');
         const minutesInput = document.getElementById('add-timer-minutes');
         const secondsInput = document.getElementById('add-timer-seconds');
         const youtubeInput = document.getElementById('add-exercise-youtube');
         const aerobicCheckbox = document.getElementById('add-exercise-aerobic');
-        
+        const exTimerCheckbox = document.getElementById('add-exercise-timer-enabled');
+        const exTimerMinutesInput = document.getElementById('add-extimer-minutes');
+        const exTimerSecondsInput = document.getElementById('add-extimer-seconds');
+
         if (!nameInput || !minutesInput || !secondsInput || !youtubeInput || !aerobicCheckbox) return;
-        
+
         const name = nameInput.value.trim();
         if (!name) {
             alert('Please enter an exercise name');
             return;
         }
-        
+
         // Check if exercise already exists
         if (this.exerciseListIncludes(name)) {
             alert('Exercise already exists. Please edit the existing exercise instead.');
             return;
         }
-        
+
         // Calculate timer duration from minutes and seconds
         const minutes = parseInt(minutesInput.value) || 0;
         const seconds = parseInt(secondsInput.value) || 0;
         const timerDuration = (minutes * 60) + seconds;
-        
+
         // Allow 0:00 for exercises with no timer
         // No validation needed - 0 is valid
-        
+
         const youtubeLink = youtubeInput.value.trim();
         const isAerobic = aerobicCheckbox.checked;
-        
+
+        // Exercise Timer - a separate, manually-triggered timer (distinct from the
+        // automatic rest/set timer above), only set when the checkbox is enabled
+        let exerciseTimer = null;
+        if (exTimerCheckbox && exTimerCheckbox.checked) {
+            const exTimerMinutes = exTimerMinutesInput ? (parseInt(exTimerMinutesInput.value) || 0) : 0;
+            const exTimerSeconds = exTimerSecondsInput ? (parseInt(exTimerSecondsInput.value) || 0) : 0;
+            exerciseTimer = (exTimerMinutes * 60) + exTimerSeconds;
+            if (exerciseTimer <= 0) exerciseTimer = null;
+        }
+
         // Add to exercise list
         this.exerciseList.push({
             name: name,
             timerDuration: timerDuration,
             youtubeLink: youtubeLink,
-            isAerobic: isAerobic
+            isAerobic: isAerobic,
+            exerciseTimer: exerciseTimer
         });
 
         // Update local cache immediately so the change is reflected right away
@@ -2767,6 +2857,10 @@ class WorkoutTracker {
         document.body.removeChild(modal);
 
         alert('Exercise added successfully!');
+
+        if (typeof onCreated === 'function') {
+            onCreated(name);
+        }
     }
 
     editExerciseConfiguration(index) {
@@ -2800,7 +2894,13 @@ class WorkoutTracker {
         const totalSeconds = exercise.timerDuration || this.defaultTimer;
         const minutes = Math.floor(totalSeconds / 60);
         const seconds = totalSeconds % 60;
-        
+
+        // Calculate minutes and seconds for the (optional) exercise timer
+        const exTimerEnabled = !!exercise.exerciseTimer;
+        const exTimerTotalSeconds = exercise.exerciseTimer || 120;
+        const exTimerMinutes = Math.floor(exTimerTotalSeconds / 60);
+        const exTimerSeconds = exTimerTotalSeconds % 60;
+
         // Create dialog box
         const dialog = document.createElement('div');
         dialog.style.cssText = `
@@ -2852,33 +2952,103 @@ class WorkoutTracker {
                     <span style="font-weight: 600;">Is Aerobic Exercise</span>
                 </label>
             </div>
+            <div class="form-group" style="margin-bottom: 20px;">
+                <label style="display: flex; align-items: center; gap: 10px; margin-bottom: 10px;">
+                    <input type="checkbox" id="edit-exercise-timer-enabled" ${exTimerEnabled ? 'checked' : ''} style="width: 20px; height: 20px;">
+                    <span style="font-weight: 600;">Exercise Timer</span>
+                </label>
+                <small style="color: #666; display: block; margin-bottom: 10px;">Adds a timer button next to reps/weight when logging this exercise - separate from the rest timer between sets</small>
+                <div id="edit-exercise-timer-fields" style="display: ${exTimerEnabled ? 'flex' : 'none'}; align-items: center; gap: 15px; justify-content: center; margin: 15px 0;">
+                    <div style="display: flex; flex-direction: column; align-items: center; gap: 5px;">
+                        <label style="font-size: 12px; color: #666; margin-bottom: 5px;">Minutes</label>
+                        <div style="display: flex; align-items: center; gap: 5px;">
+                            <button type="button" id="edit-extimer-inc-minutes" class="btn-secondary" style="width: 35px; height: 35px; padding: 0; font-size: 18px; border-radius: 5px;">+</button>
+                            <input type="number" id="edit-extimer-minutes" min="0" max="59" value="${exTimerMinutes}" style="width: 70px; text-align: center; padding: 8px; font-size: 18px; border: 2px solid #e0e0e0; border-radius: 5px;">
+                            <button type="button" id="edit-extimer-dec-minutes" class="btn-secondary" style="width: 35px; height: 35px; padding: 0; font-size: 18px; border-radius: 5px;">−</button>
+                        </div>
+                    </div>
+                    <span style="font-size: 24px; font-weight: bold; color: #667eea; margin-top: 20px;">:</span>
+                    <div style="display: flex; flex-direction: column; align-items: center; gap: 5px;">
+                        <label style="font-size: 12px; color: #666; margin-bottom: 5px;">Seconds</label>
+                        <div style="display: flex; align-items: center; gap: 5px;">
+                            <button type="button" id="edit-extimer-inc-seconds" class="btn-secondary" style="width: 35px; height: 35px; padding: 0; font-size: 18px; border-radius: 5px;">+</button>
+                            <input type="number" id="edit-extimer-seconds" min="0" max="59" value="${exTimerSeconds}" style="width: 70px; text-align: center; padding: 8px; font-size: 18px; border: 2px solid #e0e0e0; border-radius: 5px;">
+                            <button type="button" id="edit-extimer-dec-seconds" class="btn-secondary" style="width: 35px; height: 35px; padding: 0; font-size: 18px; border-radius: 5px;">−</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
             <div style="display: flex; gap: 10px; justify-content: flex-end;">
                 <button id="edit-exercise-cancel-btn" class="btn-secondary" style="padding: 10px 20px;">Cancel</button>
                 <button id="edit-exercise-save-btn" class="btn-primary" style="padding: 10px 20px;">Save Changes</button>
             </div>
         `;
-        
+
         modal.appendChild(dialog);
         document.body.appendChild(modal);
-        
+
+        // Toggle exercise-timer duration fields when the checkbox is switched
+        const exTimerCheckbox = document.getElementById('edit-exercise-timer-enabled');
+        const exTimerFieldsEl = document.getElementById('edit-exercise-timer-fields');
+        exTimerCheckbox.addEventListener('change', () => {
+            exTimerFieldsEl.style.display = exTimerCheckbox.checked ? 'flex' : 'none';
+        });
+
+        // Setup exercise-timer +/- buttons
+        const exTimerMinutesInput = document.getElementById('edit-extimer-minutes');
+        const exTimerSecondsInput = document.getElementById('edit-extimer-seconds');
+
+        document.getElementById('edit-extimer-dec-minutes').addEventListener('click', () => {
+            const current = parseInt(exTimerMinutesInput.value) || 0;
+            if (current > 0) exTimerMinutesInput.value = current - 1;
+        });
+        document.getElementById('edit-extimer-inc-minutes').addEventListener('click', () => {
+            const current = parseInt(exTimerMinutesInput.value) || 0;
+            if (current < 59) exTimerMinutesInput.value = current + 1;
+        });
+        document.getElementById('edit-extimer-dec-seconds').addEventListener('click', () => {
+            const current = parseInt(exTimerSecondsInput.value) || 0;
+            if (current > 0) {
+                exTimerSecondsInput.value = current - 1;
+            } else if (current === 0) {
+                const mins = parseInt(exTimerMinutesInput.value) || 0;
+                if (mins > 0) {
+                    exTimerMinutesInput.value = mins - 1;
+                    exTimerSecondsInput.value = 59;
+                }
+            }
+        });
+        document.getElementById('edit-extimer-inc-seconds').addEventListener('click', () => {
+            const current = parseInt(exTimerSecondsInput.value) || 0;
+            if (current < 59) {
+                exTimerSecondsInput.value = current + 1;
+            } else {
+                const mins = parseInt(exTimerMinutesInput.value) || 0;
+                if (mins < 59) {
+                    exTimerMinutesInput.value = mins + 1;
+                    exTimerSecondsInput.value = 0;
+                }
+            }
+        });
+
         // Setup timer +/- buttons
         const minutesInput = document.getElementById('edit-timer-minutes');
         const secondsInput = document.getElementById('edit-timer-seconds');
-        
+
         document.getElementById('edit-timer-dec-minutes').addEventListener('click', () => {
             const current = parseInt(minutesInput.value) || 0;
             if (current > 0) {
                 minutesInput.value = current - 1;
             }
         });
-        
+
         document.getElementById('edit-timer-inc-minutes').addEventListener('click', () => {
             const current = parseInt(minutesInput.value) || 0;
             if (current < 59) {
                 minutesInput.value = current + 1;
             }
         });
-        
+
         document.getElementById('edit-timer-dec-seconds').addEventListener('click', () => {
             const current = parseInt(secondsInput.value) || 0;
             if (current > 0) {
@@ -2932,7 +3102,10 @@ class WorkoutTracker {
         const secondsInput = document.getElementById('edit-timer-seconds');
         const youtubeInput = document.getElementById('edit-exercise-youtube');
         const aerobicCheckbox = document.getElementById('edit-exercise-aerobic');
-        
+        const exTimerCheckbox = document.getElementById('edit-exercise-timer-enabled');
+        const exTimerMinutesInput = document.getElementById('edit-extimer-minutes');
+        const exTimerSecondsInput = document.getElementById('edit-extimer-seconds');
+
         if (!nameInput || !minutesInput || !secondsInput || !youtubeInput || !aerobicCheckbox) return;
         
         const name = nameInput.value.trim();
@@ -2960,13 +3133,24 @@ class WorkoutTracker {
         
         const youtubeLink = youtubeInput.value.trim();
         const isAerobic = aerobicCheckbox.checked;
-        
+
+        // Exercise Timer - a separate, manually-triggered timer (distinct from the
+        // rest/set timer above), only set when the checkbox is enabled
+        let exerciseTimer = null;
+        if (exTimerCheckbox && exTimerCheckbox.checked) {
+            const exTimerMinutes = exTimerMinutesInput ? (parseInt(exTimerMinutesInput.value) || 0) : 0;
+            const exTimerSeconds = exTimerSecondsInput ? (parseInt(exTimerSecondsInput.value) || 0) : 0;
+            exerciseTimer = (exTimerMinutes * 60) + exTimerSeconds;
+            if (exerciseTimer <= 0) exerciseTimer = null;
+        }
+
         // Update exercise in list
         this.exerciseList[index] = {
             name: name,
             timerDuration: timerDuration,
             youtubeLink: youtubeLink,
-            isAerobic: isAerobic
+            isAerobic: isAerobic,
+            exerciseTimer: exerciseTimer
         };
 
         // Update local cache immediately so the change is reflected right away
@@ -3075,14 +3259,19 @@ class WorkoutTracker {
 
     setupPlanHandlers() {
         const generateSlotsBtn = document.getElementById('generate-slots-btn');
+        const addPlanSlotBtn = document.getElementById('add-plan-slot-btn');
         const savePlanBtn = document.getElementById('save-plan-btn');
         const cancelPlanBtn = document.getElementById('cancel-plan-btn');
         const clearPlanBtn = document.getElementById('clear-plan-btn');
-        
+
         if (generateSlotsBtn) {
             generateSlotsBtn.addEventListener('click', () => this.generatePlanSlots());
         }
-        
+
+        if (addPlanSlotBtn) {
+            addPlanSlotBtn.addEventListener('click', () => this.addPlanSlot());
+        }
+
         if (savePlanBtn) {
             savePlanBtn.addEventListener('click', () => this.saveWorkoutPlan());
         }
@@ -3414,110 +3603,156 @@ class WorkoutTracker {
             alert('Please enter a number between 1 and 20');
             return;
         }
-        
+
         const container = document.getElementById('plan-exercise-slots');
         if (!container) return;
-        
+
         container.innerHTML = '';
-        
-        // Get available exercises
-        const normalizedList = this.normalizeExerciseList(this.exerciseList);
-        const exerciseNames = normalizedList.map(ex => ex.name).sort();
-        
+
         for (let i = 1; i <= slotsCount; i++) {
-            const group = document.createElement('div');
-            group.className = 'form-group plan-slot-draggable';
-            group.draggable = true;
-            group.dataset.slotIndex = i - 1;
-            group.style.cursor = 'move';
-            group.style.position = 'relative';
-            
-            const select = document.createElement('select');
-            select.className = 'plan-exercise-slot';
-            select.dataset.slot = i;
-            
-            // Add empty option
-            const emptyOption = document.createElement('option');
-            emptyOption.value = '';
-            emptyOption.textContent = '-- Select Exercise --';
-            select.appendChild(emptyOption);
-            
-            // Add exercise options (will be filtered by updatePlanSlotOptions)
-            exerciseNames.forEach(name => {
-                const option = document.createElement('option');
-                option.value = name;
-                option.textContent = name;
-                select.appendChild(option);
-            });
-            
-            // Target sets/reps/weight (or duration for aerobic exercises) for this slot
-            const targetContainer = document.createElement('div');
-            targetContainer.className = 'plan-slot-target';
-
-            // Add change event listener to update other dropdowns and the target fields
-            select.addEventListener('change', () => {
-                this.updatePlanSlotOptions();
-                this.renderPlanSlotTargetFields(targetContainer, select.value.trim());
-            });
-
-            // Add drag handle icon
-            const dragHandle = document.createElement('span');
-            dragHandle.innerHTML = '☰';
-            dragHandle.style.cssText = 'position: absolute; left: -20px; top: 50%; transform: translateY(-50%); cursor: move; color: #999; font-size: 18px;';
-            dragHandle.style.pointerEvents = 'none';
-
-            const label = document.createElement('label');
-            label.textContent = `Exercise Slot ${i}`;
-
-            group.appendChild(dragHandle);
-            group.appendChild(label);
-            group.appendChild(select);
-            group.appendChild(targetContainer);
-            container.appendChild(group);
-            
-            // Add drag event listeners
-            group.addEventListener('dragstart', (e) => {
-                e.dataTransfer.effectAllowed = 'move';
-                e.dataTransfer.setData('text/plain', group.dataset.slotIndex);
-                group.style.opacity = '0.5';
-            });
-            
-            group.addEventListener('dragend', (e) => {
-                group.style.opacity = '1';
-                // Remove all drag-over classes
-                container.querySelectorAll('.plan-slot-draggable').forEach(g => {
-                    g.classList.remove('drag-over');
-                });
-            });
-            
-            group.addEventListener('dragover', (e) => {
-                e.preventDefault();
-                e.dataTransfer.dropEffect = 'move';
-                group.classList.add('drag-over');
-            });
-            
-            group.addEventListener('dragleave', (e) => {
-                group.classList.remove('drag-over');
-            });
-            
-            group.addEventListener('drop', (e) => {
-                e.preventDefault();
-                group.classList.remove('drag-over');
-                
-                const draggedIndex = parseInt(e.dataTransfer.getData('text/plain'));
-                const targetIndex = parseInt(group.dataset.slotIndex);
-                
-                if (draggedIndex !== targetIndex) {
-                    this.reorderPlanSlots(draggedIndex, targetIndex);
-                }
-            });
+            container.appendChild(this.createPlanSlotElement(i));
         }
-        
+
         // Initial update to filter options
         this.updatePlanSlotOptions();
 
         document.getElementById('save-plan-btn').style.display = 'inline-block';
         document.getElementById('cancel-plan-btn').style.display = 'inline-block';
+    }
+
+    // Append a single new, empty exercise slot to the plan being built/edited, without
+    // touching any slots already there
+    addPlanSlot() {
+        const container = document.getElementById('plan-exercise-slots');
+        if (!container) return;
+
+        const nextSlotNumber = container.querySelectorAll('.plan-slot-draggable').length + 1;
+        container.appendChild(this.createPlanSlotElement(nextSlotNumber));
+
+        // Refresh option lists (new slot needs them) without disturbing existing selections
+        this.updatePlanSlotOptions();
+
+        document.getElementById('save-plan-btn').style.display = 'inline-block';
+        document.getElementById('cancel-plan-btn').style.display = 'inline-block';
+    }
+
+    // Remove a single exercise slot from the plan being built/edited and renumber the rest
+    removePlanSlot(group) {
+        const container = document.getElementById('plan-exercise-slots');
+        if (!container || !group) return;
+
+        group.remove();
+
+        const remainingGroups = Array.from(container.querySelectorAll('.plan-slot-draggable'));
+        remainingGroups.forEach((g, index) => {
+            g.dataset.slotIndex = index;
+            const select = g.querySelector('.plan-exercise-slot');
+            if (select) select.dataset.slot = index + 1;
+            const label = g.querySelector('label');
+            if (label) label.textContent = `Exercise Slot ${index + 1}`;
+        });
+
+        this.updatePlanSlotOptions();
+    }
+
+    // Build a single plan-slot element (exercise picker, target fields, drag handlers,
+    // remove button). Not appended to the DOM - callers do that and should call
+    // updatePlanSlotOptions() afterwards to populate the exercise dropdown.
+    createPlanSlotElement(slotNumber) {
+        const group = document.createElement('div');
+        group.className = 'form-group plan-slot-draggable';
+        group.draggable = true;
+        group.dataset.slotIndex = slotNumber - 1;
+        group.style.cursor = 'move';
+        group.style.position = 'relative';
+
+        const select = document.createElement('select');
+        select.className = 'plan-exercise-slot';
+        select.dataset.slot = slotNumber;
+
+        // Target sets/reps/weight (or duration for aerobic exercises) for this slot
+        const targetContainer = document.createElement('div');
+        targetContainer.className = 'plan-slot-target';
+
+        // Add change event listener to update other dropdowns and the target fields
+        select.addEventListener('change', () => {
+            if (select.value === '__add_new_exercise__') {
+                // Don't leave the sentinel option selected - open the add-exercise modal
+                // instead, and select the newly created exercise here once it's saved
+                select.value = '';
+                this.showAddExerciseModal((newExerciseName) => {
+                    select.value = newExerciseName;
+                    this.updatePlanSlotOptions();
+                    this.renderPlanSlotTargetFields(targetContainer, newExerciseName);
+                });
+                return;
+            }
+            this.updatePlanSlotOptions();
+            this.renderPlanSlotTargetFields(targetContainer, select.value.trim());
+        });
+
+        // Add drag handle icon
+        const dragHandle = document.createElement('span');
+        dragHandle.innerHTML = '☰';
+        dragHandle.style.cssText = 'position: absolute; left: -20px; top: 50%; transform: translateY(-50%); cursor: move; color: #999; font-size: 18px;';
+        dragHandle.style.pointerEvents = 'none';
+
+        const label = document.createElement('label');
+        label.textContent = `Exercise Slot ${slotNumber}`;
+
+        // Remove-slot button
+        const removeBtn = document.createElement('button');
+        removeBtn.type = 'button';
+        removeBtn.className = 'btn-danger remove-plan-slot-btn';
+        removeBtn.textContent = '✕';
+        removeBtn.title = 'Remove this exercise slot';
+        removeBtn.style.cssText = 'position: absolute; right: 0; top: 0; padding: 4px 8px; font-size: 12px;';
+        removeBtn.addEventListener('click', () => this.removePlanSlot(group));
+
+        group.appendChild(dragHandle);
+        group.appendChild(label);
+        group.appendChild(removeBtn);
+        group.appendChild(select);
+        group.appendChild(targetContainer);
+
+        // Add drag event listeners
+        group.addEventListener('dragstart', (e) => {
+            e.dataTransfer.effectAllowed = 'move';
+            e.dataTransfer.setData('text/plain', group.dataset.slotIndex);
+            group.style.opacity = '0.5';
+        });
+
+        group.addEventListener('dragend', (e) => {
+            group.style.opacity = '1';
+            // Remove all drag-over classes
+            document.querySelectorAll('.plan-slot-draggable').forEach(g => {
+                g.classList.remove('drag-over');
+            });
+        });
+
+        group.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            e.dataTransfer.dropEffect = 'move';
+            group.classList.add('drag-over');
+        });
+
+        group.addEventListener('dragleave', (e) => {
+            group.classList.remove('drag-over');
+        });
+
+        group.addEventListener('drop', (e) => {
+            e.preventDefault();
+            group.classList.remove('drag-over');
+
+            const draggedIndex = parseInt(e.dataTransfer.getData('text/plain'));
+            const targetIndex = parseInt(group.dataset.slotIndex);
+
+            if (draggedIndex !== targetIndex) {
+                this.reorderPlanSlots(draggedIndex, targetIndex);
+            }
+        });
+
+        return group;
     }
 
     // Render the target sets/reps/weight (or target duration for aerobic exercises)
@@ -3708,6 +3943,12 @@ class WorkoutTracker {
                     select.appendChild(option);
                 }
             });
+
+            // Let the user create a brand new exercise without leaving the plan builder
+            const addNewOption = document.createElement('option');
+            addNewOption.value = '__add_new_exercise__';
+            addNewOption.textContent = '+ Add New Exercise...';
+            select.appendChild(addNewOption);
         });
     }
 
@@ -4735,7 +4976,7 @@ class WorkoutTracker {
         }
         
         container.innerHTML = '';
-        
+
         // Get the label element to update it
         const labelElement = container.parentElement.querySelector('label');
         if (labelElement) {
@@ -4745,6 +4986,18 @@ class WorkoutTracker {
             } else {
                 labelElement.innerHTML = 'Reps and Weight for Each Set <small style="color: #999; font-weight: normal;">(can be different)</small>';
             }
+        }
+
+        // Manual "Exercise Timer" button - only shown if this exercise has one configured.
+        // Separate from the automatic rest/set timer that starts after saving.
+        if (exercise && exercise.exerciseTimer) {
+            const timerBtn = document.createElement('button');
+            timerBtn.type = 'button';
+            timerBtn.className = 'btn-secondary exercise-timer-btn';
+            timerBtn.style.cssText = 'display: block; margin-bottom: 10px;';
+            timerBtn.textContent = `⏱️ Exercise Timer (${this.formatRestTimer(exercise.exerciseTimer)})`;
+            timerBtn.addEventListener('click', () => this.startExerciseTimer());
+            container.appendChild(timerBtn);
         }
 
         if (isAerobic) {
@@ -5557,15 +5810,28 @@ class WorkoutTracker {
         return true;
     }
 
-    startRestTimer() {
+    // `explicitDuration`/`title` (both optional) let a caller start a timer with a
+    // specific duration and modal title instead of the automatic post-save rest timer
+    // lookup below - used by the manual "Exercise Timer" button.
+    startRestTimer(explicitDuration = null, title = null) {
         console.log('startRestTimer called');
-        
+
         // Stop any existing timer
         if (this.restTimer) {
             clearInterval(this.restTimer);
             this.restTimer = null;
         }
-        
+
+        const timerTitle = document.getElementById('rest-timer-title');
+        if (timerTitle) {
+            timerTitle.textContent = title || '⏱️ Rest Timer';
+        }
+
+        if (explicitDuration !== null && explicitDuration !== undefined) {
+            this.runRestTimerCountdown(explicitDuration);
+            return;
+        }
+
         // Get the last exercise name to check for exercise-specific timer
         let timerDuration = this.defaultTimer;
         if (this.currentSession.exercises && this.currentSession.exercises.length > 0) {
@@ -5611,12 +5877,18 @@ class WorkoutTracker {
             // Use the current default timer (always use the most up-to-date value)
             timerDuration = this.defaultTimer;
         }
-        
+
+        this.runRestTimerCountdown(timerDuration);
+    }
+
+    // Shared tail end of startRestTimer(): show the modal and run the countdown for a
+    // given duration, once the duration has already been decided.
+    runRestTimerCountdown(timerDuration) {
         // Reset display elements
         const timerDisplay = document.getElementById('timer-seconds');
         const timerLabel = document.querySelector('.timer-label');
         const skipBtn = document.getElementById('skip-timer-btn');
-        
+
         if (timerDisplay) {
             timerDisplay.style.fontSize = '48px';
         }
@@ -5626,11 +5898,11 @@ class WorkoutTracker {
         if (skipBtn) {
             skipBtn.style.display = 'block';
         }
-        
+
         // Set timer duration
         this.restTimerSeconds = timerDuration;
         console.log('Timer duration set to:', timerDuration, 'seconds');
-        
+
         // Show timer modal
         const timerModal = document.getElementById('rest-timer-modal');
         if (timerModal) {
@@ -5639,21 +5911,32 @@ class WorkoutTracker {
         } else {
             console.error('Timer modal not found!');
         }
-        
+
         // Update display immediately
         this.updateTimerDisplay();
         console.log('Timer display updated, starting countdown...');
-        
+
         // Start countdown
         this.restTimer = setInterval(() => {
             this.restTimerSeconds--;
             this.updateTimerDisplay();
-            
+
             if (this.restTimerSeconds <= 0) {
                 this.completeRestTimer();
             }
         }, 1000);
         console.log('Timer interval started');
+    }
+
+    // Start the manual "Exercise Timer" for the currently selected exercise (if it has
+    // one configured) - separate from the automatic rest/set timer above
+    startExerciseTimer() {
+        const select = document.getElementById('exercise-name');
+        const exerciseName = select ? select.value.trim() : '';
+        const exercise = exerciseName ? this.getExerciseByName(exerciseName) : null;
+        if (!exercise || !exercise.exerciseTimer) return;
+
+        this.startRestTimer(exercise.exerciseTimer, `⏱️ ${exercise.name} Timer`);
     }
 
     stopRestTimer() {
@@ -5667,7 +5950,13 @@ class WorkoutTracker {
         if (timerModal) {
             timerModal.style.display = 'none';
         }
-        
+
+        // Reset title back to the default rest timer label
+        const timerTitle = document.getElementById('rest-timer-title');
+        if (timerTitle) {
+            timerTitle.textContent = '⏱️ Rest Timer';
+        }
+
         // Reset display elements
         const timerDisplay = document.getElementById('timer-seconds');
         const timerLabel = document.querySelector('.timer-label');
@@ -5717,7 +6006,7 @@ class WorkoutTracker {
             timerDisplay.style.fontSize = '36px';
         }
         if (timerLabel) {
-            timerLabel.textContent = 'Rest Completed';
+            timerLabel.textContent = 'Completed';
         }
         
         // Hide skip button since rest is complete
@@ -5865,7 +6154,8 @@ class WorkoutTracker {
                     name: item,
                     timerDuration: this.defaultTimer,
                     youtubeLink: '',
-                    isAerobic: false
+                    isAerobic: false,
+                    exerciseTimer: null
                 };
             }
             // Already an object, ensure all fields exist
@@ -5873,7 +6163,8 @@ class WorkoutTracker {
                 name: item.name || '',
                 timerDuration: item.timerDuration || this.defaultTimer,
                 youtubeLink: item.youtubeLink || '',
-                isAerobic: item.isAerobic || false
+                isAerobic: item.isAerobic || false,
+                exerciseTimer: item.exerciseTimer || null
             };
         });
     }
@@ -6469,14 +6760,16 @@ class WorkoutTracker {
             
             // Try to write to Exercises tab, create if it doesn't exist
             try {
-                const rows = [['Exercise Name', 'Rest Timer (M:S)', 'YouTube Link', 'Is Aerobic']]; // Header
+                const rows = [['Exercise Name', 'Rest Timer (M:S)', 'YouTube Link', 'Is Aerobic', 'Exercise Timer (M:S)']]; // Header
                 normalizedList.forEach(exercise => {
                     const timerStr = exercise.timerDuration ? this.formatRestTimer(exercise.timerDuration) : '';
+                    const exerciseTimerStr = exercise.exerciseTimer ? this.formatRestTimer(exercise.exerciseTimer) : '';
                     rows.push([
                         exercise.name,
                         timerStr,
                         exercise.youtubeLink || '',
-                        exercise.isAerobic ? 'true' : 'false'
+                        exercise.isAerobic ? 'true' : 'false',
+                        exerciseTimerStr
                     ]);
                 });
 
@@ -6494,14 +6787,16 @@ class WorkoutTracker {
                     await this.createExercisesSheet();
                     exercisesTabName = 'Exercises';
                     // Retry
-                    const rows = [['Exercise Name', 'Rest Timer (M:S)', 'YouTube Link', 'Is Aerobic']];
+                    const rows = [['Exercise Name', 'Rest Timer (M:S)', 'YouTube Link', 'Is Aerobic', 'Exercise Timer (M:S)']];
                     normalizedList.forEach(exercise => {
                         const timerStr = exercise.timerDuration ? this.formatRestTimer(exercise.timerDuration) : '';
+                        const exerciseTimerStr = exercise.exerciseTimer ? this.formatRestTimer(exercise.exerciseTimer) : '';
                         rows.push([
                             exercise.name,
                             timerStr,
                             exercise.youtubeLink || '',
-                            exercise.isAerobic ? 'true' : 'false'
+                            exercise.isAerobic ? 'true' : 'false',
+                            exerciseTimerStr
                         ]);
                     });
                     const escapedTabName = this.escapeSheetTabName('Exercises');
@@ -6536,7 +6831,7 @@ class WorkoutTracker {
                                 title: 'Exercises',
                                 gridProperties: {
                                     rowCount: 1000,
-                                    columnCount: 4
+                                    columnCount: 5
                                 }
                             }
                         }
@@ -6784,10 +7079,10 @@ class WorkoutTracker {
             }
             
             const escapedTabName = this.escapeSheetTabName(exercisesTabName);
-            // Load all columns (A:D) for exercise configuration
+            // Load all columns (A:E) for exercise configuration
             const response = await gapi.client.sheets.spreadsheets.values.get({
                 spreadsheetId: staticSheetId,
-                range: `${escapedTabName}!A2:D1000` // Skip header row, load columns A-D
+                range: `${escapedTabName}!A2:E1000` // Skip header row, load columns A-E
             });
 
             const rows = response.result.values || [];
@@ -6797,15 +7092,16 @@ class WorkoutTracker {
                     .map(row => {
                         const name = row[0]?.trim();
                         if (!name || name.length === 0) return null;
-                        
+
                         // Parse exercise object
                         const exercise = {
                             name: name,
                             timerDuration: this.defaultTimer,
                             youtubeLink: '',
-                            isAerobic: false
+                            isAerobic: false,
+                            exerciseTimer: null
                         };
-                        
+
                         // Column B: Timer Duration (seconds, or M:S format)
                         if (row[1] !== undefined && row[1] !== null && row[1] !== '') {
                             const timerStr = String(row[1]).trim();
@@ -6820,18 +7116,27 @@ class WorkoutTracker {
                                 }
                             }
                         }
-                        
+
                         // Column C: YouTube Link
                         if (row[2] !== undefined && row[2] !== null && row[2] !== '') {
                             exercise.youtubeLink = String(row[2]).trim();
                         }
-                        
+
                         // Column D: Is Aerobic
                         if (row[3] !== undefined && row[3] !== null && row[3] !== '') {
                             const aerobicStr = String(row[3]).trim().toLowerCase();
                             exercise.isAerobic = aerobicStr === 'true' || aerobicStr === '1' || aerobicStr === 'yes';
                         }
-                        
+
+                        // Column E: Exercise Timer (M:S) - separate manual timer, optional
+                        if (row[4] !== undefined && row[4] !== null && row[4] !== '') {
+                            const exTimerStr = String(row[4]).trim();
+                            const parsedExTimer = this.parseRestTimer(exTimerStr);
+                            if (parsedExTimer !== null && parsedExTimer > 0) {
+                                exercise.exerciseTimer = parsedExTimer;
+                            }
+                        }
+
                         return exercise;
                     })
                     .filter(ex => ex !== null);
