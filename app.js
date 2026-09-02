@@ -41,7 +41,8 @@ class WorkoutTracker {
         this.completedPlanExercises = []; // Track which exercises have been completed in current plan session (don't modify plan permanently)
         this.manuallySelectedExercise = null; // Track manually selected exercise to preserve selection
         this.manuallySwitchingExercise = false; // Flag to prevent auto-starting timer when manually switching exercises
-        
+        this.pendingPlanImport = null; // {planId, creatorSheetId} - a shared-plan link opened before sign-in, resumed once signed in
+
         // Initialize cache and auth managers
         this.cacheManager = new CacheManager();
         this.authManager = new AuthManager();
@@ -96,7 +97,9 @@ class WorkoutTracker {
                 this.activatePlan(plan.id);
             }
         } else if (planParam && !this.isSignedIn) {
-            // Show message to sign in first
+            // Not signed in yet - remember this link and resume the import automatically
+            // once sign-in completes (see resumePendingPlanImportIfAny())
+            this.pendingPlanImport = { planId: planParam, creatorSheetId: creatorSheetId || null };
             alert('Please sign in with Google to import this workout plan. After signing in, a new workout sheet will be automatically created for you.');
         }
         
@@ -281,6 +284,8 @@ class WorkoutTracker {
             this.dataLoaded = true;
             this.updateSyncStatus();
             this.updateHeaderButtons(); // Update header to hide purpose section when fully connected
+
+            await this.resumePendingPlanImportIfAny();
             return;
         }
 
@@ -337,6 +342,8 @@ class WorkoutTracker {
                         this.dataLoaded = true;
                         this.updateSyncStatus();
                         this.updateHeaderButtons(); // Update header to hide purpose section when fully connected
+
+                        await this.resumePendingPlanImportIfAny();
                     });
                 } else if (tokenResponse.error) {
                     console.error('Sign-in error:', tokenResponse.error);
@@ -2396,70 +2403,111 @@ class WorkoutTracker {
         }
     }
 
-    async savePlanFollowerInfo(planId, creatorSheetId, followerEmail, followerName, followerSheetId, sessionsSheetId, progressSharingEnabled) {
-        if (!this.isSignedIn || !creatorSheetId) return;
-        
+    // Look up the followers-registry spreadsheet ID recorded on a given static/Config
+    // sheet (Config!D1). Works for both a creator reading their own sheet and a
+    // follower reading a creator's sheet - both only need read access to check this.
+    async resolveFollowersRegistrySheetId(staticSheetId) {
+        if (!staticSheetId) return null;
         try {
             await this.initGoogleSheets();
-            
-            // Ensure PlanFollowers sheet exists in creator's Config sheet
+            const response = await gapi.client.sheets.spreadsheets.values.get({
+                spreadsheetId: staticSheetId,
+                range: 'Config!D1'
+            });
+            const id = response.result.values?.[0]?.[0]?.trim();
+            return id || null;
+        } catch (error) {
+            console.log('No followers registry recorded yet:', error.message);
+            return null;
+        }
+    }
+
+    // Creator-only: ensure a small, separate "Workout Tracker - Followers" spreadsheet
+    // exists for this account and is shared as writable by anyone with a plan link.
+    // It's kept entirely separate from the Plans/Exercises/Config sheet - which stays
+    // read-only - so that a follower can register themselves as following a plan
+    // without ever needing write access to the creator's actual plan data. Called when
+    // a plan is shared; safe to call repeatedly (reuses the existing registry).
+    async ensureFollowersRegistrySheetId() {
+        const staticSheetId = this.getStaticSheetId();
+        if (!this.isSignedIn || !staticSheetId) return null;
+
+        const existingId = await this.resolveFollowersRegistrySheetId(staticSheetId);
+        if (existingId) {
             try {
-                const response = await gapi.client.sheets.spreadsheets.get({
-                    spreadsheetId: creatorSheetId
-                });
-                const sheets = response.result.sheets || [];
-                const planFollowersSheet = sheets.find(s => s.properties.title === 'PlanFollowers');
-                
-                if (!planFollowersSheet) {
-                    await gapi.client.sheets.spreadsheets.batchUpdate({
-                        spreadsheetId: creatorSheetId,
-                        resource: {
-                            requests: [{
-                                addSheet: {
-                                    properties: {
-                                        title: 'PlanFollowers',
-                                        gridProperties: {
-                                            rowCount: 1000,
-                                            columnCount: 8
-                                        }
-                                    }
-                                }
-                            }]
-                        }
-                    });
-                    
-                    // Add header row
-                    await gapi.client.sheets.spreadsheets.values.update({
-                        spreadsheetId: creatorSheetId,
-                        range: 'PlanFollowers!A1:H1',
-                        valueInputOption: 'RAW',
-                        resource: {
-                            values: [[
-                                'PlanId',
-                                'FollowerEmail',
-                                'FollowerName',
-                                'FollowerSheetId',
-                                'SessionsSheetId',
-                                'ProgressSharingEnabled',
-                                'SharedAt',
-                                'LastWorkoutDate'
-                            ]]
-                        }
-                    });
-                }
+                // Make sure it wasn't deleted from Drive since we recorded it
+                await gapi.client.sheets.spreadsheets.get({ spreadsheetId: existingId, fields: 'spreadsheetId' });
+                return existingId;
             } catch (error) {
-                console.error('Error checking/creating PlanFollowers sheet:', error);
-                throw error;
+                console.warn('Recorded followers registry is no longer accessible, recreating:', error.message);
             }
-            
+        }
+
+        try {
+            await this.initGoogleSheets();
+
+            const createResponse = await gapi.client.sheets.spreadsheets.create({
+                resource: {
+                    properties: { title: 'Workout Tracker - Followers' },
+                    sheets: [{ properties: { title: 'PlanFollowers' } }]
+                }
+            });
+            const registrySheetId = createResponse.result.spreadsheetId;
+
+            await gapi.client.sheets.spreadsheets.values.update({
+                spreadsheetId: registrySheetId,
+                range: 'PlanFollowers!A1:H1',
+                valueInputOption: 'RAW',
+                resource: {
+                    values: [[
+                        'PlanId', 'FollowerEmail', 'FollowerName', 'FollowerSheetId',
+                        'SessionsSheetId', 'ProgressSharingEnabled', 'SharedAt', 'LastWorkoutDate'
+                    ]]
+                }
+            });
+
+            // Anyone with a shared plan link needs to be able to write their own
+            // registration here, regardless of whether they were shared by specific email
+            await this.shareSheetForPlan(registrySheetId, null, 'writer');
+
+            // Record it on our own Config sheet so future lookups (by us or followers) find it
+            await gapi.client.sheets.spreadsheets.values.update({
+                spreadsheetId: staticSheetId,
+                range: 'Config!D1',
+                valueInputOption: 'RAW',
+                resource: { values: [[registrySheetId]] }
+            });
+
+            return registrySheetId;
+        } catch (error) {
+            console.error('Error creating followers registry sheet:', error);
+            return null;
+        }
+    }
+
+    // `creatorSheetId` here is the creator's Plans/Exercises/Config sheet (used only to
+    // look up their followers registry - see resolveFollowersRegistrySheetId()). The
+    // actual read/write happens on that separate registry sheet, since a follower only
+    // ever has read access to the creator's real Config sheet.
+    async savePlanFollowerInfo(planId, creatorSheetId, followerEmail, followerName, followerSheetId, sessionsSheetId, progressSharingEnabled) {
+        if (!this.isSignedIn || !creatorSheetId) return;
+
+        const registrySheetId = await this.resolveFollowersRegistrySheetId(creatorSheetId);
+        if (!registrySheetId) {
+            throw new Error('This plan\'s creator hasn\'t set up follower sharing yet - ask them to re-share the plan.');
+        }
+
+        try {
+            await this.initGoogleSheets();
+
             // Load existing followers
             const followers = await this.loadPlanFollowers(creatorSheetId);
-            
+
             // Check if follower already exists for this plan
-            const existingIndex = followers.findIndex(f => 
+            const existingIndex = followers.findIndex(f =>
                 f.planId === planId && f.followerEmail === followerEmail
             );
-            
+
             const followerInfo = {
                 planId: planId,
                 followerEmail: followerEmail,
@@ -2470,17 +2518,18 @@ class WorkoutTracker {
                 sharedAt: new Date().toISOString(),
                 lastWorkoutDate: ''
             };
-            
+
             if (existingIndex >= 0) {
-                // Update existing entry (preserve sharedAt, update other fields)
+                // Update existing entry (preserve sharedAt and lastWorkoutDate, update the rest)
                 followerInfo.sharedAt = followers[existingIndex].sharedAt || followerInfo.sharedAt;
+                followerInfo.lastWorkoutDate = followers[existingIndex].lastWorkoutDate || '';
                 followers[existingIndex] = followerInfo;
             } else {
                 // Add new entry
                 followers.push(followerInfo);
             }
-            
-            // Save to PlanFollowers sheet
+
+            // Save to the registry's PlanFollowers sheet
             const rows = [['PlanId', 'FollowerEmail', 'FollowerName', 'FollowerSheetId', 'SessionsSheetId', 'ProgressSharingEnabled', 'SharedAt', 'LastWorkoutDate']];
             followers.forEach(f => {
                 rows.push([
@@ -2494,14 +2543,14 @@ class WorkoutTracker {
                     f.lastWorkoutDate || ''
                 ]);
             });
-            
+
             await gapi.client.sheets.spreadsheets.values.update({
-                spreadsheetId: creatorSheetId,
+                spreadsheetId: registrySheetId,
                 range: 'PlanFollowers!A1',
                 valueInputOption: 'RAW',
                 resource: { values: rows }
             });
-            
+
             console.log('Plan follower info saved successfully');
         } catch (error) {
             console.error('Error saving plan follower info:', error);
@@ -2509,15 +2558,20 @@ class WorkoutTracker {
         }
     }
 
+    // `creatorSheetId` (defaults to our own static sheet) identifies whose followers to
+    // load - this is resolved to that creator's separate followers-registry sheet first.
     async loadPlanFollowers(creatorSheetId = null) {
         const sheetId = creatorSheetId || this.getStaticSheetId();
         if (!this.isSignedIn || !sheetId) return [];
-        
+
+        const registrySheetId = await this.resolveFollowersRegistrySheetId(sheetId);
+        if (!registrySheetId) return [];
+
         try {
             await this.initGoogleSheets();
-            
+
             const response = await gapi.client.sheets.spreadsheets.values.get({
-                spreadsheetId: sheetId,
+                spreadsheetId: registrySheetId,
                 range: 'PlanFollowers!A2:H1000'
             });
             
@@ -4419,7 +4473,22 @@ class WorkoutTracker {
             }
             
             // Handle WhatsApp share button
-            document.getElementById('whatsapp-share-btn').addEventListener('click', () => {
+            document.getElementById('whatsapp-share-btn').addEventListener('click', async () => {
+                // The "Continue" (email) button grants read access to the static sheet
+                // before sharing the link - this button skipped that entirely, so anyone
+                // who received a plan via WhatsApp had a link to a sheet they couldn't
+                // actually read, and importing it would silently fail. Do the same here.
+                try {
+                    const recipientEmail = emailInput.value.trim();
+                    await this.shareSheetForPlan(staticSheetId, recipientEmail || null);
+                } catch (error) {
+                    console.error('Error sharing sheet for WhatsApp share:', error);
+                    const continueAnyway = confirm(
+                        'Failed to automatically share the sheet. The recipient may not be able to import this plan unless you share it manually in Google Sheets.\n\n' +
+                        'Open WhatsApp anyway?'
+                    );
+                    if (!continueAnyway) return;
+                }
                 this.shareViaWhatsApp(plan, planLink);
             });
             
@@ -4524,12 +4593,21 @@ class WorkoutTracker {
             `• Config tab - default settings\n\n` +
             `Your personal workout data ("Workout Tracker - Sessions" sheet) will NOT be shared and remains completely private.\n\n` +
             `The sheet will be shared as "Anyone with the link can view" (read-only).\n\n` +
+            `A separate "Workout Tracker - Followers" sheet will also be created (if you don't already have one) so people who follow this plan can register to share their progress with you - it only ever holds a list of followers, never your plans or exercises.\n\n` +
             `Do you want to continue?`;
-        
+
         if (!confirm(warningMessage)) {
             return;
         }
-        
+
+        // Make sure the followers registry exists and is ready to accept registrations
+        // before generating the share link - safe/cheap to call even if one already exists
+        try {
+            await this.ensureFollowersRegistrySheetId();
+        } catch (error) {
+            console.warn('Could not set up followers registry - progress sharing may not work for this share:', error);
+        }
+
         // Show enhanced share dialog
         await this.showSharePlanDialog(plan, staticSheetId);
     }
@@ -4577,40 +4655,43 @@ class WorkoutTracker {
         return null;
     }
 
-    async shareSheetForPlan(sheetId, recipientEmail = null) {
+    // `role` defaults to 'reader' (view-only) for the normal case of sharing a plan or
+    // sessions sheet. Only the dedicated followers-registry file (see
+    // ensureFollowersRegistrySheetId()) is ever shared as 'writer'.
+    async shareSheetForPlan(sheetId, recipientEmail = null, role = 'reader') {
         try {
             await this.initGoogleDrive();
-            
+
             if (!gapi.client || !gapi.client.drive) {
                 throw new Error('Google Drive API not initialized');
             }
-            
+
             // Ensure token is set
             gapi.client.setToken({ access_token: this.googleToken });
-            
+
             if (recipientEmail && recipientEmail.trim() !== '') {
-                // Share with specific email (viewer permission)
+                // Share with specific email
                 await gapi.client.drive.permissions.create({
                     fileId: sheetId,
                     resource: {
-                        role: 'reader',
+                        role: role,
                         type: 'user',
                         emailAddress: recipientEmail.trim()
                     },
                     fields: 'id'
                 });
-                console.log(`Sheet shared with ${recipientEmail}`);
+                console.log(`Sheet shared with ${recipientEmail} (${role})`);
             } else {
-                // Share publicly (anyone with link can view)
+                // Share publicly (anyone with the link)
                 await gapi.client.drive.permissions.create({
                     fileId: sheetId,
                     resource: {
-                        role: 'reader',
+                        role: role,
                         type: 'anyone'
                     },
                     fields: 'id'
                 });
-                console.log('Sheet shared publicly (anyone with link can view)');
+                console.log(`Sheet shared publicly (anyone with link can ${role === 'writer' ? 'edit' : 'view'})`);
             }
         } catch (error) {
             console.error('Error sharing sheet:', error);
@@ -4634,7 +4715,8 @@ class WorkoutTracker {
                     name: exerciseName,
                     timerDuration: config.timerDuration || this.defaultTimer,
                     youtubeLink: config.youtubeLink || '',
-                    isAerobic: config.isAerobic || false
+                    isAerobic: config.isAerobic || false,
+                    exerciseTimer: config.exerciseTimer || null
                 };
             }
         } else {
@@ -4643,13 +4725,33 @@ class WorkoutTracker {
                 name: exerciseName,
                 timerDuration: config.timerDuration || this.defaultTimer,
                 youtubeLink: config.youtubeLink || '',
-                isAerobic: config.isAerobic || false
+                isAerobic: config.isAerobic || false,
+                exerciseTimer: config.exerciseTimer || null
             });
         }
         
         // Save to sheet
         await this.saveExerciseList();
         this.updateExerciseList();
+    }
+
+    // If a shared-plan link was opened before the user was signed in, this resumes
+    // the import (or activates an already-owned plan by ID) once sign-in and initial
+    // data loading have completed. Called from requestAccessToken() after each of its
+    // "data loaded" points.
+    async resumePendingPlanImportIfAny() {
+        if (!this.pendingPlanImport) return;
+        const { planId, creatorSheetId } = this.pendingPlanImport;
+        this.pendingPlanImport = null;
+
+        if (creatorSheetId) {
+            await this.importPlanFromLink(planId, creatorSheetId);
+        } else {
+            const plan = this.workoutPlans.find(p => p.id === planId);
+            if (plan) {
+                this.activatePlan(plan.id);
+            }
+        }
     }
 
     async importPlanFromLink(planId, creatorSheetId) {
@@ -4824,9 +4926,9 @@ class WorkoutTracker {
             try {
                 const exerciseResponse = await gapi.client.sheets.spreadsheets.values.get({
                     spreadsheetId: creatorSheetId,
-                    range: 'Exercises!A2:D1000'
+                    range: 'Exercises!A2:E1000'
                 });
-                
+
                 const exerciseRows = exerciseResponse.result.values || [];
                 let configFound = false;
                 for (const row of exerciseRows) {
@@ -4834,37 +4936,46 @@ class WorkoutTracker {
                         const config = {
                             timerDuration: this.defaultTimer,
                             youtubeLink: '',
-                            isAerobic: false
+                            isAerobic: false,
+                            exerciseTimer: null
                         };
-                        
+
                         if (row[1]) {
                             const parsed = this.parseRestTimer(String(row[1]).trim());
                             if (parsed !== null) {
                                 config.timerDuration = parsed;
                             }
                         }
-                        
+
                         if (row[2]) {
                             config.youtubeLink = String(row[2]).trim();
                         }
-                        
+
                         if (row[3]) {
                             const aerobicStr = String(row[3]).trim().toLowerCase();
                             config.isAerobic = aerobicStr === 'true' || aerobicStr === '1' || aerobicStr === 'yes';
                         }
-                        
+
+                        if (row[4]) {
+                            const parsedExTimer = this.parseRestTimer(String(row[4]).trim());
+                            if (parsedExTimer !== null && parsedExTimer > 0) {
+                                config.exerciseTimer = parsedExTimer;
+                            }
+                        }
+
                         await this.copyExerciseConfigToRecipient(slot.exerciseName, config);
                         configFound = true;
                         break;
                     }
                 }
-                
+
                 if (!configFound) {
                     // Add exercise with default config if not found
                     await this.copyExerciseConfigToRecipient(slot.exerciseName, {
                         timerDuration: this.defaultTimer,
                         youtubeLink: '',
-                        isAerobic: false
+                        isAerobic: false,
+                        exerciseTimer: null
                     });
                 }
             } catch (error) {
@@ -4873,7 +4984,8 @@ class WorkoutTracker {
                 await this.copyExerciseConfigToRecipient(slot.exerciseName, {
                     timerDuration: this.defaultTimer,
                     youtubeLink: '',
-                    isAerobic: false
+                    isAerobic: false,
+                    exerciseTimer: null
                 });
             }
         }

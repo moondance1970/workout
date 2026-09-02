@@ -156,35 +156,115 @@ describe('Plan Sharing Integration', () => {
   });
 
   describe('Exercise Config Sharing', () => {
-    it('should copy exercise config to recipient', async () => {
+    it('should copy exercise config to recipient, including the exercise timer', async () => {
       const exerciseName = 'Bench Press';
       const config = {
         timerDuration: 90,
         youtubeLink: 'https://youtube.com/watch?v=bench',
-        isAerobic: false
+        isAerobic: false,
+        exerciseTimer: 60
       };
       const recipientSheetId = 'recipient-sheet-789';
 
-      // Simulate copying config
+      // Simulate copying config - mirrors doImportPlan()/copyExerciseConfigToRecipient()
       const values = [
-        ['Exercise Name', 'Timer Duration', 'YouTube Link', 'Is Aerobic'],
+        ['Exercise Name', 'Timer Duration', 'YouTube Link', 'Is Aerobic', 'Exercise Timer'],
         [
           exerciseName,
           config.timerDuration.toString(),
           config.youtubeLink,
-          config.isAerobic.toString()
+          config.isAerobic.toString(),
+          config.exerciseTimer.toString()
         ]
       ];
 
       const response = await mockSheets.spreadsheets.values.update({
         spreadsheetId: recipientSheetId,
-        range: 'Exercises!A1:D10',
+        range: 'Exercises!A1:E10',
         values: {
           body: { values }
         }
       });
 
       expect(response.result.updatedCells).toBeGreaterThan(0);
+      expect(values[1][4]).toBe('60');
+    });
+  });
+
+  describe('Followers Registry (progress sharing)', () => {
+    // A follower only ever has read access to the creator's real Plans/Exercises/Config
+    // sheet, so follower registrations can't be written there. Instead, a separate
+    // "Workout Tracker - Followers" sheet is created per creator and shared as writable,
+    // keeping the real plan data read-only. See ensureFollowersRegistrySheetId() /
+    // resolveFollowersRegistrySheetId() / savePlanFollowerInfo() in app.js.
+
+    it('should share the static (Plans/Exercises/Config) sheet as read-only', async () => {
+      const response = await mockDrive.permissions.create({
+        fileId: 'creator-static-sheet',
+        resource: { type: 'anyone', role: 'reader' }
+      });
+
+      expect(response.result.role).toBe('reader');
+    });
+
+    it('should share the followers registry as writable, not read-only', async () => {
+      const response = await mockDrive.permissions.create({
+        fileId: 'followers-registry-sheet',
+        resource: { type: 'anyone', role: 'writer' }
+      });
+
+      expect(response.result.role).toBe('writer');
+      expect(response.result.role).not.toBe('reader');
+    });
+
+    it('should record the registry sheet ID on the creator\'s own Config sheet', async () => {
+      const creatorStaticSheetId = 'creator-static-sheet';
+      const registrySheetId = 'followers-registry-sheet';
+
+      await mockSheets.spreadsheets.values.update({
+        spreadsheetId: creatorStaticSheetId,
+        range: 'Config!D1',
+        values: { body: { values: [[registrySheetId]] } }
+      });
+
+      mockSheets.spreadsheets.values.get.mockResolvedValueOnce({
+        result: { values: [[registrySheetId]] }
+      });
+
+      const response = await mockSheets.spreadsheets.values.get({
+        spreadsheetId: creatorStaticSheetId,
+        range: 'Config!D1'
+      });
+
+      expect(response.result.values[0][0]).toBe(registrySheetId);
+    });
+
+    it('should resolve to null when the creator has no registry recorded yet', async () => {
+      mockSheets.spreadsheets.values.get.mockResolvedValueOnce({ result: {} });
+
+      const response = await mockSheets.spreadsheets.values.get({
+        spreadsheetId: 'creator-static-sheet',
+        range: 'Config!D1'
+      });
+
+      const id = response.result.values?.[0]?.[0]?.trim() || null;
+      expect(id).toBeNull();
+    });
+
+    it('should preserve lastWorkoutDate when a follower re-registers', () => {
+      // Mirrors the merge logic in savePlanFollowerInfo()
+      const existingFollowers = [
+        { planId: 'plan-1', followerEmail: 'trainee@example.com', sharedAt: '2026-01-01T00:00:00.000Z', lastWorkoutDate: '2026-02-01T00:00:00.000Z' }
+      ];
+
+      const newInfo = { planId: 'plan-1', followerEmail: 'trainee@example.com', sharedAt: new Date().toISOString(), lastWorkoutDate: '' };
+      const existingIndex = existingFollowers.findIndex(f => f.planId === newInfo.planId && f.followerEmail === newInfo.followerEmail);
+
+      newInfo.sharedAt = existingFollowers[existingIndex].sharedAt || newInfo.sharedAt;
+      newInfo.lastWorkoutDate = existingFollowers[existingIndex].lastWorkoutDate || '';
+
+      expect(newInfo.sharedAt).toBe('2026-01-01T00:00:00.000Z');
+      expect(newInfo.lastWorkoutDate).toBe('2026-02-01T00:00:00.000Z');
     });
   });
 });
