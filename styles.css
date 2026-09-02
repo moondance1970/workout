@@ -450,6 +450,20 @@ button {
     border-left: 3px solid var(--accent-primary);
 }
 
+/* Plan-provided comment for the exercise currently selected in Track Workout */
+.plan-comment-box {
+    background: var(--bg-card);
+    border-radius: var(--radius-lg);
+    border: 1px solid var(--border-primary);
+    border-left: 3px solid var(--accent-primary);
+    box-shadow: var(--shadow-sm);
+    padding: var(--spacing-lg);
+    color: var(--text-primary);
+    font-size: var(--font-size-sm);
+    font-weight: 500;
+    white-space: pre-wrap;
+}
+
 /* ============================================
    FORMS
    ============================================ */

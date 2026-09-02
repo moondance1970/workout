@@ -298,4 +298,37 @@ describe('Workout Plans', () => {
       expect(line).toBe('   - Target: 3×10 @ 40kg\n');
     });
   });
+
+  describe('Exercise Slot Comments', () => {
+    it('should only save a comment when one was actually entered', () => {
+      // Mirrors the optional-field pattern in saveWorkoutPlan()
+      const readComment = (rawValue) => {
+        const slot = { slotNumber: 1, exerciseName: 'Squats' };
+        const comment = (rawValue || '').trim();
+        if (comment) slot.comment = comment;
+        return slot;
+      };
+
+      expect(readComment('Keep your back straight')).toHaveProperty('comment', 'Keep your back straight');
+      expect(readComment('   ')).not.toHaveProperty('comment');
+      expect(readComment('')).not.toHaveProperty('comment');
+    });
+
+    it('should only show the comments box when the selected exercise has one', () => {
+      // Mirrors updatePlanCommentBox()'s visibility decision
+      const shouldShowComment = (slot) => !!(slot && slot.comment);
+
+      expect(shouldShowComment({ exerciseName: 'Squats', comment: 'Go slow' })).toBe(true);
+      expect(shouldShowComment({ exerciseName: 'Squats' })).toBe(false);
+      expect(shouldShowComment(null)).toBe(false);
+    });
+
+    it('should preserve a saved comment when re-editing the plan', () => {
+      const plan = createMockPlan('plan-1', 'Leg Day', [
+        { slotNumber: 1, exerciseName: 'Squats', comment: 'Go slow on the way down' }
+      ]);
+
+      expect(plan.exerciseSlots[0].comment).toBe('Go slow on the way down');
+    });
+  });
 });

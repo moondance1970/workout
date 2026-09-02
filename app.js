@@ -1592,6 +1592,7 @@ class WorkoutTracker {
                 container.innerHTML = '<p class="no-data">Select an exercise to see your last session and recommendations</p>';
                 // Reset to default reps/weight inputs
                 this.updateRepsInputs();
+                this.updatePlanCommentBox(null);
             }
         });
 
@@ -3784,6 +3785,14 @@ class WorkoutTracker {
         const exerciseConfig = this.getExerciseByName(exerciseName);
         const isAerobic = exerciseConfig && exerciseConfig.isAerobic;
 
+        const existingComment = existingSlot && existingSlot.comment ? this.escapeForHtml(existingSlot.comment) : '';
+        const commentFieldHtml = `
+            <div style="margin-top: 10px;">
+                <label style="font-size: 12px; color: #666; display: block; margin-bottom: 5px;">Comment for whoever follows this plan (optional)</label>
+                <textarea class="plan-slot-comment" rows="2" placeholder="e.g. Focus on form, go slow on the way down..." style="width: 100%; padding: 8px; border: 2px solid #e0e0e0; border-radius: 5px; font-size: 14px; box-sizing: border-box; font-family: inherit;">${existingComment}</textarea>
+            </div>
+        `;
+
         if (isAerobic) {
             const minutes = existingSlot && existingSlot.targetDuration ? Math.floor(existingSlot.targetDuration / 60) : '';
             const seconds = existingSlot && existingSlot.targetDuration ? existingSlot.targetDuration % 60 : '';
@@ -3795,6 +3804,7 @@ class WorkoutTracker {
                     <input type="number" class="plan-target-duration-seconds exercise-duration-input" min="0" max="59" placeholder="Sec" value="${seconds}" style="width: 65px; text-align: center;">
                     <span>sec</span>
                 </div>
+                ${commentFieldHtml}
             `;
         } else {
             const sets = existingSlot && existingSlot.targetSets ? existingSlot.targetSets : '';
@@ -3810,8 +3820,18 @@ class WorkoutTracker {
                     <input type="number" class="plan-target-weight exercise-duration-input" min="0" step="0.5" inputmode="decimal" placeholder="Weight" value="${weight}" style="width: 75px; text-align: center;">
                     <span>kg</span>
                 </div>
+                ${commentFieldHtml}
             `;
         }
+    }
+
+    // Escape a plain string for safe interpolation into an HTML template (e.g. inside
+    // a <textarea>...</textarea>), so characters like < & > can't break the markup.
+    escapeForHtml(str) {
+        if (!str) return '';
+        const div = document.createElement('div');
+        div.textContent = str;
+        return div.innerHTML;
     }
 
     // Format a plan slot's target into a short display string, e.g. "3×10 @ 40kg" or "20:00"
@@ -3880,6 +3900,23 @@ class WorkoutTracker {
         }
         if (slot.targetWeight) {
             document.querySelectorAll('.weight-input').forEach(input => { input.value = slot.targetWeight; });
+        }
+    }
+
+    // Show or hide the "Comments" box on the tracking form based on whether the given
+    // plan slot has a comment set. Pass null/undefined to hide it (no exercise
+    // selected, or no active plan for the selected exercise).
+    updatePlanCommentBox(slot) {
+        const section = document.getElementById('plan-comment-section');
+        const content = document.getElementById('plan-comment-content');
+        if (!section || !content) return;
+
+        if (slot && slot.comment) {
+            content.textContent = slot.comment;
+            section.style.display = 'block';
+        } else {
+            content.textContent = '';
+            section.style.display = 'none';
         }
     }
 
@@ -4010,6 +4047,11 @@ class WorkoutTracker {
                         if (targetReps > 0) slot.targetReps = targetReps;
                         if (targetWeight > 0) slot.targetWeight = targetWeight;
                     }
+
+                    // Optional comment for whoever follows this plan
+                    const commentInput = group.querySelector('.plan-slot-comment');
+                    const comment = commentInput ? commentInput.value.trim() : '';
+                    if (comment) slot.comment = comment;
 
                     exerciseSlots.push(slot);
                 }
@@ -5402,6 +5444,7 @@ class WorkoutTracker {
         document.getElementById('exercise-name-new').value = '';
         document.getElementById('exercise-name-new').style.display = 'none';
         this.clearFormFields();
+        this.updatePlanCommentBox(null);
         document.getElementById('exercise-name').focus();
     }
 
@@ -5425,6 +5468,9 @@ class WorkoutTracker {
         const planSlot = this.getActivePlanSlotForExercise(exerciseName);
         const planTarget = planSlot ? this.formatPlanSlotTarget(planSlot) : '';
         const planTargetHtml = planTarget ? `<p class="suggestion">🎯 Plan target: ${planTarget}</p>` : '';
+
+        // Show the plan creator's comment for this exercise, if any
+        this.updatePlanCommentBox(planSlot);
 
         if (allExercises.length === 0) {
             container.innerHTML = `<div class="recommendation-item">

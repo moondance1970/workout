@@ -450,4 +450,107 @@ test.describe('Plan Management', () => {
     const planCard = page.locator('.plan-card', { hasText: 'Leg Day' });
     await expect(planCard).toContainText('3×10 @ 40kg');
   });
+
+  test.describe('Plan slot comments', () => {
+    test('should show the plan comment above Notes when the exercise is selected, and hide it otherwise', async ({ page }) => {
+      test.setTimeout(30000);
+      await signInWithExercises(page, ['Squats']);
+
+      await page.fill('#plan-slots-count', '1');
+      await page.click('#generate-slots-btn');
+      await page.waitForTimeout(200);
+
+      const select = page.locator('#plan-exercise-slots select').first();
+      await select.selectOption('Squats');
+      await page.waitForTimeout(100);
+
+      const slot = page.locator('.plan-slot-draggable').first();
+      await expect(slot.locator('.plan-slot-comment')).toBeVisible();
+      await slot.locator('.plan-slot-comment').fill('Keep your back straight and go slow.');
+
+      await page.fill('#plan-name', 'Leg Day');
+      await page.click('#save-plan-btn');
+      await page.waitForTimeout(500);
+
+      // Activate the saved plan directly - avoids depending on dropdown UI details
+      await page.evaluate(() => {
+        const plan = window.workoutTracker.workoutPlans.find(p => p.name === 'Leg Day');
+        window.workoutTracker.activatePlan(plan.id);
+      });
+
+      await page.click('button[data-tab="track"]');
+      await page.waitForTimeout(100);
+      await page.selectOption('#exercise-name', 'Squats');
+      await page.waitForTimeout(200);
+
+      const commentSection = page.locator('#plan-comment-section');
+      await expect(commentSection).toBeVisible();
+      await expect(page.locator('#plan-comment-content')).toHaveText('Keep your back straight and go slow.');
+
+      // Positioned directly above the Notes field
+      const commentBox = await commentSection.boundingBox();
+      const notesBox = await page.locator('#notes').boundingBox();
+      expect(commentBox.y).toBeLessThan(notesBox.y);
+
+      // Clearing the exercise selection hides it again
+      await page.selectOption('#exercise-name', '');
+      await page.waitForTimeout(100);
+      await expect(commentSection).toBeHidden();
+    });
+
+    test('should not show the comments box for a plan exercise without a comment', async ({ page }) => {
+      test.setTimeout(30000);
+      await signInWithExercises(page, ['Squats', 'Lunges']);
+
+      await page.fill('#plan-slots-count', '2');
+      await page.click('#generate-slots-btn');
+      await page.waitForTimeout(200);
+
+      const slots = page.locator('#plan-exercise-slots select');
+      await slots.nth(0).selectOption('Squats');
+      await slots.nth(1).selectOption('Lunges');
+      await page.waitForTimeout(100);
+
+      // Only give the first slot a comment; leave the second blank
+      await page.locator('.plan-slot-draggable').first().locator('.plan-slot-comment').fill('Squats comment');
+
+      await page.fill('#plan-name', 'Mixed Day');
+      await page.click('#save-plan-btn');
+      await page.waitForTimeout(500);
+
+      await page.evaluate(() => {
+        const plan = window.workoutTracker.workoutPlans.find(p => p.name === 'Mixed Day');
+        window.workoutTracker.activatePlan(plan.id);
+      });
+
+      await page.click('button[data-tab="track"]');
+      await page.waitForTimeout(100);
+      await page.selectOption('#exercise-name', 'Lunges');
+      await page.waitForTimeout(200);
+
+      await expect(page.locator('#plan-comment-section')).toBeHidden();
+    });
+
+    test('should restore a saved comment when editing the plan again', async ({ page }) => {
+      test.setTimeout(30000);
+      await signInWithExercises(page, ['Squats']);
+
+      await page.fill('#plan-slots-count', '1');
+      await page.click('#generate-slots-btn');
+      await page.waitForTimeout(200);
+
+      await page.locator('#plan-exercise-slots select').first().selectOption('Squats');
+      await page.waitForTimeout(100);
+      await page.locator('.plan-slot-comment').first().fill('Original comment');
+
+      await page.fill('#plan-name', 'Leg Day');
+      await page.click('#save-plan-btn');
+      await page.waitForTimeout(500);
+
+      await page.locator('.edit-plan-btn').first().click();
+      await page.waitForTimeout(300);
+
+      await expect(page.locator('.plan-slot-comment').first()).toHaveValue('Original comment');
+    });
+  });
 });
