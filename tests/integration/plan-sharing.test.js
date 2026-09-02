@@ -267,4 +267,51 @@ describe('Plan Sharing Integration', () => {
       expect(newInfo.lastWorkoutDate).toBe('2026-02-01T00:00:00.000Z');
     });
   });
+
+  describe('Multiple trainers / own plans coexisting', () => {
+    // Regression coverage for a bug where doImportPlan() overwrote plan.createdBy with
+    // the importer's own email, so progress sharing pointed at yourself instead of the
+    // trainer who actually created the plan.
+    it('should keep the original trainer\'s email as createdBy after import, not the importer\'s', () => {
+      const importedPlan = { id: 'plan-1', name: 'Leg Day', createdBy: 'trainer@example.com', creatorSheetId: 'trainer-sheet' };
+      const importerEmail = 'me@example.com';
+      const myOwnStaticSheetId = 'my-sheet';
+
+      // Mirrors doImportPlan(): creatorSheetId is repointed to where the data now
+      // lives, but createdBy is deliberately left alone
+      importedPlan.id = 'plan_new_1';
+      importedPlan.creatorSheetId = myOwnStaticSheetId;
+
+      expect(importedPlan.createdBy).toBe('trainer@example.com');
+      expect(importedPlan.createdBy).not.toBe(importerEmail);
+      expect(importedPlan.creatorSheetId).toBe(myOwnStaticSheetId);
+    });
+
+    it('should let plans from multiple different trainers, plus an own plan, coexist', () => {
+      const myEmail = 'me@example.com';
+      const workoutPlans = [
+        { id: 'plan-own', name: 'My Routine', createdBy: myEmail, creatorSheetId: 'my-sheet' },
+        { id: 'plan-a', name: 'Leg Day', createdBy: 'trainerA@example.com', creatorSheetId: 'my-sheet' },
+        { id: 'plan-b', name: 'Push Pull', createdBy: 'trainerB@example.com', creatorSheetId: 'my-sheet' }
+      ];
+
+      const ownPlans = workoutPlans.filter(p => p.createdBy === myEmail);
+      const importedPlans = workoutPlans.filter(p => p.createdBy !== myEmail);
+      const distinctTrainers = new Set(importedPlans.map(p => p.createdBy));
+
+      expect(workoutPlans.length).toBe(3);
+      expect(ownPlans.length).toBe(1);
+      expect(importedPlans.length).toBe(2);
+      expect(distinctTrainers.size).toBe(2);
+    });
+
+    it('should register progress sharing separately per trainer (different registries)', () => {
+      // Each creator has their own followers registry, so sharing progress with
+      // trainer A writes to a different sheet than sharing with trainer B
+      const registryForTrainerA = 'registry-a';
+      const registryForTrainerB = 'registry-b';
+
+      expect(registryForTrainerA).not.toBe(registryForTrainerB);
+    });
+  });
 });

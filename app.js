@@ -3364,6 +3364,11 @@ class WorkoutTracker {
                 const exerciseCount = plan.exerciseSlots ? plan.exerciseSlots.length : 0;
                 const isActive = this.activePlanId === plan.id;
 
+                // Show who a plan is from when it wasn't created by us (e.g. imported
+                // from a trainer) - own plans are left unlabeled
+                const isOwnPlan = !plan.createdBy || plan.createdBy === this.userEmail;
+                const creatorLabelHtml = isOwnPlan ? '' : `<p class="plan-meta">From: ${plan.createdBy}</p>`;
+
                 let exerciseListHtml = '';
                 if (plan.exerciseSlots && plan.exerciseSlots.length > 0) {
                     exerciseListHtml = '<ul class="plan-exercise-summary" style="margin: 8px 0; padding-left: 18px; font-size: 13px; color: #555;">';
@@ -3378,6 +3383,7 @@ class WorkoutTracker {
                     <div class="plan-card ${isActive ? 'active' : ''}">
                         <h4>${plan.name}</h4>
                         <p class="plan-meta">${exerciseCount} exercise${exerciseCount !== 1 ? 's' : ''}</p>
+                        ${creatorLabelHtml}
                         ${exerciseListHtml}
                         ${isActive ? '<p class="plan-status">✓ Active</p>' : ''}
                         <div class="plan-actions">
@@ -4882,26 +4888,28 @@ class WorkoutTracker {
             // Handle Import button
             document.getElementById('preview-import-btn').addEventListener('click', async () => {
                 try {
+                    // The original creator's email - used below to point progress sharing
+                    // at the actual trainer, not at ourselves
+                    const originalCreatorEmail = plan.createdBy || '';
+
                     // Import the plan
                     await this.doImportPlan(plan, creatorSheetId);
-                    
+
                     // Save as imported
                     await this.saveReceivedPlanInfo(
                         plan.id,
                         plan.name || 'Unnamed Plan',
-                        plan.createdBy || '',
+                        originalCreatorEmail,
                         creatorSheetId,
                         'imported'
                     );
-                    
+
                     document.body.removeChild(modal);
                     window.history.replaceState({}, document.title, window.location.pathname);
-                    
+
                     // Show progress sharing prompt after successful import
-                    // Note: plan object may have been modified by doImportPlan, so we need to pass the original creator info
-                    const originalCreatorEmail = plan.createdBy || '';
                     await this.showProgressSharingPrompt(plan, creatorSheetId, originalCreatorEmail);
-                    
+
                     alert('Plan imported successfully! Your sheet has been set up with all exercises configured.');
                     resolve();
                 } catch (error) {
@@ -4990,13 +4998,16 @@ class WorkoutTracker {
             }
         }
         
-        // Add plan to recipient's Plans sheet
+        // Add plan to recipient's Plans sheet. creatorSheetId is repointed to our own
+        // sheet since that's now where this plan's row data actually lives (e.g. if we
+        // re-share it further); createdBy is deliberately left as the original
+        // trainer's email - it's used to find who to share progress with, and nothing
+        // in the app treats it as an ownership/edit-permission check.
         plan.id = `plan_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
         plan.creatorSheetId = this.getStaticSheetId();
-        plan.createdBy = this.userEmail || '';
         this.workoutPlans.push(plan);
         await this.saveWorkoutPlans();
-        
+
         // Activate the plan
         this.activatePlan(plan.id);
     }
