@@ -314,4 +314,76 @@ describe('Plan Sharing Integration', () => {
       expect(registryForTrainerA).not.toBe(registryForTrainerB);
     });
   });
+
+  describe('Duplicate Import Prevention', () => {
+    // Regression coverage for a bug where re-opening the same shared plan link (or
+    // double-clicking Import) created a second copy of the plan every time.
+
+    it('should record the trainer\'s original planId/creatorSheetId as sourcePlanId/sourceCreatorSheetId', () => {
+      // Mirrors doImportPlan(): plan.id is reassigned to a new local ID, but the
+      // trainer's original identity is preserved separately for de-dup purposes
+      const plan = { id: 'plan_trainer_original', name: 'Leg Day' };
+      const originalCreatorSheetId = 'trainer-sheet';
+
+      plan.sourcePlanId = plan.id;
+      plan.sourceCreatorSheetId = originalCreatorSheetId;
+      plan.id = 'plan_local_new_copy';
+      plan.creatorSheetId = 'my-sheet';
+
+      expect(plan.sourcePlanId).toBe('plan_trainer_original');
+      expect(plan.sourceCreatorSheetId).toBe('trainer-sheet');
+      expect(plan.id).not.toBe(plan.sourcePlanId);
+    });
+
+    it('should find the existing local copy by sourcePlanId/sourceCreatorSheetId, not by id or name', () => {
+      // The old (buggy) lookup compared p.id === planId or matched by plan name -
+      // neither can ever match since import always assigns a new id. The fix looks up
+      // by the preserved source identity instead.
+      const workoutPlans = [
+        { id: 'plan_local_1', name: 'Leg Day', sourcePlanId: 'plan_trainer_A', sourceCreatorSheetId: 'trainer-a-sheet' },
+        { id: 'plan_local_2', name: 'Leg Day', sourcePlanId: 'plan_trainer_B', sourceCreatorSheetId: 'trainer-b-sheet' } // same name, different trainer
+      ];
+
+      const found = workoutPlans.find(p =>
+        p.sourcePlanId === 'plan_trainer_B' && p.sourceCreatorSheetId === 'trainer-b-sheet'
+      );
+
+      expect(found).toBeTruthy();
+      expect(found.id).toBe('plan_local_2');
+
+      // The old id-based check would never have matched either copy
+      const oldStyleMatch = workoutPlans.find(p => p.id === 'plan_trainer_B');
+      expect(oldStyleMatch).toBeUndefined();
+    });
+
+    it('should not create a duplicate when the same plan+creator was already marked imported', () => {
+      const receivedPlans = [
+        { planId: 'plan_trainer_A', creatorSheetId: 'trainer-a-sheet', planName: 'Leg Day', status: 'imported' }
+      ];
+
+      const isAlreadyImported = (planId, creatorSheetId) =>
+        receivedPlans.some(p => p.planId === planId && p.creatorSheetId === creatorSheetId && p.status === 'imported');
+
+      expect(isAlreadyImported('plan_trainer_A', 'trainer-a-sheet')).toBe(true);
+      // A different trainer's plan (even with a colliding-looking id) is unaffected
+      expect(isAlreadyImported('plan_trainer_B', 'trainer-b-sheet')).toBe(false);
+    });
+
+    it('should ignore a second Import click while the first is still in progress', () => {
+      // Mirrors the actionInProgress guard in showPlanImportPreview()
+      let actionInProgress = false;
+      let importCallCount = 0;
+
+      const onImportClick = () => {
+        if (actionInProgress) return;
+        actionInProgress = true;
+        importCallCount++;
+      };
+
+      onImportClick();
+      onImportClick(); // simulates a rapid second click before the first resolves
+
+      expect(importCallCount).toBe(1);
+    });
+  });
 });

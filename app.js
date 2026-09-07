@@ -46,8 +46,14 @@ class WorkoutTracker {
         // Initialize cache and auth managers
         this.cacheManager = new CacheManager();
         this.authManager = new AuthManager();
-        
-        this.init();
+
+        // NOTE: init() is deliberately NOT called here. AuthManager.initializeBackgroundAuth()
+        // (and other code) looks up `window.workoutTracker` to reach this instance, but
+        // that global isn't assigned until *after* this constructor returns - calling
+        // init() from inside the constructor meant that first lookup always found it
+        // undefined, so background auth silently failed on every single page load even
+        // with a valid stored token. The bootstrap code calls init() right after
+        // assigning window.workoutTracker instead.
     }
 
     async init() {
@@ -4780,9 +4786,10 @@ class WorkoutTracker {
                     window.history.replaceState({}, document.title, window.location.pathname);
                     return;
                 } else if (existingPlan.status === 'imported') {
-                    // Already imported - directly activate if plan exists
-                    const importedPlan = this.workoutPlans.find(p => 
-                        p.id === planId || (p.creatorSheetId === creatorSheetId && p.name === existingPlan.planName)
+                    // Already imported - directly activate our local copy rather than
+                    // importing a duplicate
+                    const importedPlan = this.workoutPlans.find(p =>
+                        p.sourcePlanId === planId && p.sourceCreatorSheetId === creatorSheetId
                     );
                     if (importedPlan) {
                         this.activatePlan(importedPlan.id);
@@ -4869,25 +4876,74 @@ class WorkoutTracker {
             
             modal.appendChild(dialog);
             document.body.appendChild(modal);
-            
+
+            // The plan's original ID/creator, captured now before anything can mutate
+            // them (doImportPlan() reassigns plan.id to a new one once it's ours) - this
+            // is the identity saveReceivedPlanInfo() needs to recognize "already handled
+            // this plan" on a future visit to the same link.
+            const originalPlanId = plan.id;
+
+            const cancelBtn = document.getElementById('preview-cancel-btn');
+            const importBtn = document.getElementById('preview-import-btn');
+            let actionInProgress = false;
+
             // Handle Cancel button
-            document.getElementById('preview-cancel-btn').addEventListener('click', async () => {
-                // Save as rejected
-                await this.saveReceivedPlanInfo(
-                    plan.id,
-                    plan.name || 'Unnamed Plan',
-                    plan.createdBy || '',
-                    creatorSheetId,
-                    'rejected'
-                );
+            cancelBtn.addEventListener('click', async () => {
+                if (actionInProgress) return;
+                actionInProgress = true;
+                cancelBtn.disabled = true;
+                importBtn.disabled = true;
+
+                // Save as rejected - wrapped so a failed bookkeeping write (e.g. a
+                // network hiccup) can't leave the modal stuck open with no way to close it
+                try {
+                    await this.saveReceivedPlanInfo(
+                        originalPlanId,
+                        plan.name || 'Unnamed Plan',
+                        plan.createdBy || '',
+                        creatorSheetId,
+                        'rejected'
+                    );
+                } catch (error) {
+                    console.warn('Error recording rejected plan (closing dialog anyway):', error);
+                }
                 document.body.removeChild(modal);
                 window.history.replaceState({}, document.title, window.location.pathname);
                 resolve();
             });
-            
+
             // Handle Import button
-            document.getElementById('preview-import-btn').addEventListener('click', async () => {
+            importBtn.addEventListener('click', async () => {
+                // Guard against double-clicks (or a slow network) triggering the import
+                // more than once before the modal has a chance to close
+                if (actionInProgress) return;
+                actionInProgress = true;
+                cancelBtn.disabled = true;
+                importBtn.disabled = true;
+                importBtn.textContent = 'Importing...';
+
                 try {
+                    // Re-check right before importing - if this exact plan was already
+                    // imported (e.g. the link was opened again on a later visit), don't
+                    // create a second copy; just activate the one we already have.
+                    const receivedPlans = await this.loadReceivedPlans();
+                    const alreadyImported = receivedPlans.find(p =>
+                        p.planId === originalPlanId && p.creatorSheetId === creatorSheetId && p.status === 'imported'
+                    );
+                    if (alreadyImported) {
+                        const existing = this.workoutPlans.find(p =>
+                            p.sourcePlanId === originalPlanId && p.sourceCreatorSheetId === creatorSheetId
+                        );
+                        if (existing) {
+                            this.activatePlan(existing.id);
+                        }
+                        document.body.removeChild(modal);
+                        window.history.replaceState({}, document.title, window.location.pathname);
+                        alert('You\'ve already imported this plan.');
+                        resolve();
+                        return;
+                    }
+
                     // The original creator's email - used below to point progress sharing
                     // at the actual trainer, not at ourselves
                     const originalCreatorEmail = plan.createdBy || '';
@@ -4897,7 +4953,7 @@ class WorkoutTracker {
 
                     // Save as imported
                     await this.saveReceivedPlanInfo(
-                        plan.id,
+                        originalPlanId,
                         plan.name || 'Unnamed Plan',
                         originalCreatorEmail,
                         creatorSheetId,
@@ -4915,7 +4971,9 @@ class WorkoutTracker {
                 } catch (error) {
                     console.error('Error importing plan:', error);
                     alert('Error importing plan. Please try again.');
-                    document.body.removeChild(modal);
+                    if (modal.isConnected) {
+                        document.body.removeChild(modal);
+                    }
                     resolve();
                 }
             });
@@ -5003,6 +5061,11 @@ class WorkoutTracker {
         // re-share it further); createdBy is deliberately left as the original
         // trainer's email - it's used to find who to share progress with, and nothing
         // in the app treats it as an ownership/edit-permission check.
+        // sourcePlanId/sourceCreatorSheetId record this exact plan+link's original
+        // identity, so a repeat visit to the same shared link can recognize "I already
+        // have a copy of this" instead of creating a duplicate.
+        plan.sourcePlanId = plan.id;
+        plan.sourceCreatorSheetId = creatorSheetId;
         plan.id = `plan_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
         plan.creatorSheetId = this.getStaticSheetId();
         this.workoutPlans.push(plan);
@@ -7067,7 +7130,7 @@ class WorkoutTracker {
                                 title: 'Plans',
                                 gridProperties: {
                                     rowCount: 1000,
-                                    columnCount: 6
+                                    columnCount: 8
                                 }
                             }
                         }
@@ -7136,7 +7199,7 @@ class WorkoutTracker {
             const escapedTabName = this.escapeSheetTabName(plansTabName);
             const response = await gapi.client.sheets.spreadsheets.values.get({
                 spreadsheetId: staticSheetId,
-                range: `${escapedTabName}!A2:F1000` // Skip header row, load columns A-F
+                range: `${escapedTabName}!A2:H1000` // Skip header row, load columns A-H
             });
 
             const rows = response.result.values || [];
@@ -7145,16 +7208,20 @@ class WorkoutTracker {
                     .map(row => {
                         const id = row[0]?.trim();
                         if (!id || id.length === 0) return null;
-                        
+
                         const plan = {
                             id: id,
                             name: row[1]?.trim() || '',
                             exerciseSlots: [],
                             createdAt: row[3]?.trim() || new Date().toISOString(),
                             createdBy: row[4]?.trim() || this.userEmail || '',
-                            creatorSheetId: row[5]?.trim() || this.getStaticSheetId()
+                            creatorSheetId: row[5]?.trim() || this.getStaticSheetId(),
+                            // Present only on plans imported from someone else - identifies
+                            // the trainer's original plan, so we don't import it twice
+                            sourcePlanId: row[6]?.trim() || null,
+                            sourceCreatorSheetId: row[7]?.trim() || null
                         };
-                        
+
                         // Column C: Exercise Slots (JSON string)
                         if (row[2] !== undefined && row[2] !== null && row[2] !== '') {
                             try {
@@ -7163,7 +7230,7 @@ class WorkoutTracker {
                                 console.warn('Error parsing exercise slots for plan:', id, e);
                             }
                         }
-                        
+
                         return plan;
                     })
                     .filter(plan => plan !== null);
@@ -7188,7 +7255,7 @@ class WorkoutTracker {
             let plansTabName = await this.getPlansTabName();
             
             try {
-                const rows = [['Plan ID', 'Plan Name', 'Exercise Slots (JSON)', 'Created At', 'Created By', 'Creator Sheet ID']];
+                const rows = [['Plan ID', 'Plan Name', 'Exercise Slots (JSON)', 'Created At', 'Created By', 'Creator Sheet ID', 'Source Plan ID', 'Source Creator Sheet ID']];
                 this.workoutPlans.forEach(plan => {
                     rows.push([
                         plan.id,
@@ -7196,7 +7263,9 @@ class WorkoutTracker {
                         JSON.stringify(plan.exerciseSlots),
                         plan.createdAt,
                         plan.createdBy,
-                        plan.creatorSheetId || staticSheetId
+                        plan.creatorSheetId || staticSheetId,
+                        plan.sourcePlanId || '',
+                        plan.sourceCreatorSheetId || ''
                     ]);
                 });
 
@@ -7212,7 +7281,7 @@ class WorkoutTracker {
                 if (error.message && error.message.includes('Unable to parse range')) {
                     await this.createPlansSheet();
                     plansTabName = 'Plans';
-                    const rows = [['Plan ID', 'Plan Name', 'Exercise Slots (JSON)', 'Created At', 'Created By', 'Creator Sheet ID']];
+                    const rows = [['Plan ID', 'Plan Name', 'Exercise Slots (JSON)', 'Created At', 'Created By', 'Creator Sheet ID', 'Source Plan ID', 'Source Creator Sheet ID']];
                     this.workoutPlans.forEach(plan => {
                         rows.push([
                             plan.id,
@@ -7220,7 +7289,9 @@ class WorkoutTracker {
                             JSON.stringify(plan.exerciseSlots),
                             plan.createdAt,
                             plan.createdBy,
-                            plan.creatorSheetId || staticSheetId
+                            plan.creatorSheetId || staticSheetId,
+                            plan.sourcePlanId || '',
+                            plan.sourceCreatorSheetId || ''
                         ]);
                     });
                     const escapedTabName = this.escapeSheetTabName('Plans');
@@ -9669,9 +9740,13 @@ document.addEventListener('DOMContentLoaded', () => {
         // Initialize cache and auth managers first
         window.cacheManager = new CacheManager();
         window.authManager = new AuthManager();
-        
+
         // Initialize the main app
         window.workoutTracker = new WorkoutTracker();
+
+        // Only start init() now that window.workoutTracker is assigned - see the note
+        // in the WorkoutTracker constructor for why this can't happen inside it.
+        window.workoutTracker.init();
     } catch (error) {
         console.error('Error initializing WorkoutTracker:', error);
         alert('Error loading app. Check console for details.');
