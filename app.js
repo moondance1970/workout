@@ -58,7 +58,13 @@ class WorkoutTracker {
 
     async init() {
         this.setupEventListeners();
-        
+
+        // Warm the Google client ID cache as early as possible (fire-and-forget, not
+        // awaited) so it's very likely already resolved by the time the user actually
+        // taps "Sign In" or "Start Session" - see requestAccessToken()/
+        // requestAccessTokenPromise() for why that matters.
+        this.loadConfig().catch(() => {});
+
         // Initialize background authentication first
         const isAuthenticated = await this.authManager.initializeBackgroundAuth();
         
@@ -295,8 +301,16 @@ class WorkoutTracker {
             return;
         }
 
-        // Request OAuth2 token with proper scopes
-        const clientId = await this.getClientId();
+        // Request OAuth2 token with proper scopes. Get the client ID synchronously if
+        // it's already been warmed up (see init()) - any `await` between this click and
+        // tokenClient.requestAccessToken() below risks the browser no longer treating
+        // the sign-in popup as a direct result of the tap, so it gets silently blocked
+        // (a "popup blocked" prompt on Android Chrome; often a fully silent failure
+        // with no visible sign-in at all on iOS Safari).
+        let clientId = this.googleConfig?.CLIENT_ID || null;
+        if (!clientId) {
+            clientId = await this.getClientId();
+        }
         if (!clientId) {
             alert('Google OAuth Client ID not configured.\n\nPlease check your Vercel project settings:\n1. Go to Vercel Dashboard > Your Project > Settings > Environment Variables\n2. Make sure GOOGLE_CLIENT_ID and GOOGLE_API_KEY are set\n3. Redeploy the application after setting the variables');
             return;
@@ -396,8 +410,14 @@ class WorkoutTracker {
                 return;
             }
 
-            // Request OAuth2 token with proper scopes
-            this.getClientId().then(clientId => {
+            // Request OAuth2 token with proper scopes. If the client ID is already
+            // warmed up (see init()), use it synchronously here so
+            // tokenClient.requestAccessToken() below stays in the same call stack as
+            // this click - any `await`/`.then()` gap beforehand risks the browser no
+            // longer treating the sign-in popup as a direct result of the tap, so it
+            // gets silently blocked (a "popup blocked" prompt on Android Chrome; often
+            // a fully silent failure with no visible sign-in at all on iOS Safari).
+            const proceedWithClientId = (clientId) => {
                 if (!clientId) {
                     alert('Google OAuth Client ID not configured.\n\nPlease check your Vercel project settings:\n1. Go to Vercel Dashboard > Your Project > Settings > Environment Variables\n2. Make sure GOOGLE_CLIENT_ID and GOOGLE_API_KEY are set\n3. Redeploy the application after setting the variables');
                     resolve(false);
@@ -407,14 +427,14 @@ class WorkoutTracker {
                 this.tokenRequestInProgress = true;
 
                 const scopes = 'https://www.googleapis.com/auth/drive.file https://www.googleapis.com/auth/userinfo.email https://www.googleapis.com/auth/userinfo.profile';
-                
+
                 // Use Google Identity Services token client
                 const tokenClient = google.accounts.oauth2.initTokenClient({
                     client_id: clientId,
                     scope: scopes,
                     callback: (tokenResponse) => {
                         this.tokenRequestInProgress = false;
-                        
+
                         if (tokenResponse.access_token) {
                             this.googleToken = tokenResponse.access_token;
                             // Store token with expiry (subtract 2 minutes for safety, less conservative)
@@ -422,27 +442,27 @@ class WorkoutTracker {
                             localStorage.setItem('googleAccessToken', this.googleToken);
                             localStorage.setItem('googleTokenExpiry', expiry.toISOString());
                             this.isSignedIn = true;
-                            
+
                             // Update header buttons (show session, hide login)
                             this.updateHeaderButtons();
-                            
+
                             // Load user info (which will auto-connect to sheet, create if needed, and sync)
                             this.loadUserInfo().then(async () => {
                                 this.updateSyncStatus();
                                 await this.initGoogleSheets();
-                                
+
                                 // Reload sessions from Google Sheets (source of truth)
                                 this.sessions = await this.loadSessions();
                                 this.currentSession = this.getTodaySession();
                                 this.renderTodayWorkout();
                                 this.renderHistory(); // Refresh history display
-                                
+
                                 // Ensure exercise list is loaded (loadUserInfo should have done this, but ensure it)
                                 const exercises = await this.loadExerciseList();
                                 this.exerciseList = exercises;
                                 this.updateExerciseList();
                             });
-                            
+
                             resolve(true);
                         } else if (tokenResponse.error) {
                             if (tokenResponse.error !== 'popup_closed_by_user') {
@@ -452,14 +472,21 @@ class WorkoutTracker {
                         }
                     },
                 });
-                
+
                 // Request token - only show consent if user hasn't authorized before
                 // Google Identity Services will automatically reuse existing consent
                 tokenClient.requestAccessToken();
-            }).catch(() => {
-                this.tokenRequestInProgress = false;
-                resolve(false);
-            });
+            };
+
+            const cachedClientId = this.googleConfig?.CLIENT_ID || null;
+            if (cachedClientId) {
+                proceedWithClientId(cachedClientId);
+            } else {
+                this.getClientId().then(proceedWithClientId).catch(() => {
+                    this.tokenRequestInProgress = false;
+                    resolve(false);
+                });
+            }
         });
     }
 

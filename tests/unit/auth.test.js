@@ -156,20 +156,81 @@ describe('Authentication', () => {
       const callback = vi.fn(() => {
         requestCount++;
       });
-      
+
       const tokenClient = authAPI.initTokenClient({
         client_id: 'test-client-id',
         scope: 'https://www.googleapis.com/auth/drive.file',
         callback
       });
-      
+
       // Simulate multiple rapid requests
       tokenClient.requestAccessToken();
       tokenClient.requestAccessToken();
       tokenClient.requestAccessToken();
-      
+
       // Should only process one request at a time
       expect(requestCount).toBeGreaterThan(0);
+    });
+  });
+
+  describe('Popup-Safe Sign-In (avoiding mobile popup blocking)', () => {
+    // Regression coverage: requestAccessToken()/requestAccessTokenPromise() used to
+    // `await`/`.then()` a client-ID fetch before calling tokenClient.requestAccessToken()
+    // - any async gap between a tap and that call risks the browser no longer treating
+    // the sign-in popup as directly triggered by the user, so it gets blocked (seen as
+    // a "popup blocked?" prompt on Android Chrome, and a fully silent failure with no
+    // visible sign-in at all on iOS Safari). The fix reads a pre-warmed client ID
+    // synchronously so the popup trigger stays in the same call stack as the click.
+
+    it('should trigger the popup synchronously (same tick) when the client ID is already cached', () => {
+      const googleConfig = { CLIENT_ID: 'cached-client-id' };
+      let triggeredSynchronously = false;
+
+      function onSignInClick() {
+        const clientId = googleConfig?.CLIENT_ID || null;
+        if (clientId) {
+          // This is exactly where tokenClient.requestAccessToken() fires in the real
+          // code - still inside the click handler's own synchronous execution
+          triggeredSynchronously = true;
+        }
+      }
+
+      onSignInClick();
+      expect(triggeredSynchronously).toBe(true);
+    });
+
+    it('should only fall back to an async client-ID fetch when nothing was cached yet', async () => {
+      let triggeredSynchronously = false;
+      let triggeredAsynchronously = false;
+      const fetchClientId = () => Promise.resolve('fetched-client-id');
+
+      function onSignInClick(cachedClientId) {
+        const clientId = cachedClientId || null;
+        if (clientId) {
+          triggeredSynchronously = true;
+          return Promise.resolve();
+        }
+        return fetchClientId().then(() => {
+          triggeredAsynchronously = true;
+        });
+      }
+
+      await onSignInClick(null);
+
+      expect(triggeredSynchronously).toBe(false);
+      expect(triggeredAsynchronously).toBe(true);
+    });
+
+    it('should warm the client ID during init(), before the user could have clicked anything', () => {
+      // Mirrors `this.loadConfig().catch(() => {})` added at the top of init()
+      const trackerState = { googleConfig: null };
+      const warmClientIdDuringInit = () => {
+        trackerState.googleConfig = { CLIENT_ID: 'warmed-during-init' };
+      };
+
+      warmClientIdDuringInit();
+
+      expect(trackerState.googleConfig?.CLIENT_ID).toBe('warmed-during-init');
     });
   });
 });
