@@ -59,6 +59,12 @@ class WorkoutTracker {
     async init() {
         this.setupEventListeners();
 
+        // If Google just redirected back here after a standalone-PWA sign-in (see
+        // redirectToGoogleSignIn()/isStandaloneDisplayMode()), pick up the token (and
+        // restore whatever URL this tab was on beforehand) before anything else below
+        // looks at localStorage or window.location.
+        this.handleOAuthRedirectCallback();
+
         // Warm the Google client ID cache as early as possible (fire-and-forget, not
         // awaited) so it's very likely already resolved by the time the user actually
         // taps "Sign In" or "Start Session" - see requestAccessToken()/
@@ -265,6 +271,86 @@ class WorkoutTracker {
         return config?.API_KEY || null;
     }
 
+    isStandaloneDisplayMode() {
+        // True when running as an installed/home-screen PWA rather than a normal
+        // browser tab - iOS Safari's "Add to Home Screen" (window.navigator.standalone)
+        // or an installed Android/desktop PWA (display-mode: standalone).
+        //
+        // This matters because Google Identity Services' popup sign-in flow opens the
+        // consent screen via window.open() under the hood, and window.open() called
+        // from inside a standalone web app's WKWebView on iOS is a silent no-op - no
+        // popup, no error, nothing visibly happens at all when the button is tapped.
+        // That exactly matches the symptom reported testing from a home-screen icon,
+        // as opposed to a regular Safari tab (where the existing popup flow works).
+        try {
+            if (window.navigator.standalone === true) return true;
+            return !!(window.matchMedia && window.matchMedia('(display-mode: standalone)').matches);
+        } catch (e) {
+            return false;
+        }
+    }
+
+    redirectToGoogleSignIn(clientId, scopes) {
+        // Standalone PWAs can't reliably use GIS's popup flow (see
+        // isStandaloneDisplayMode() above), so fall back to a plain top-level OAuth
+        // redirect instead - a normal page navigation works fine even inside a
+        // standalone WKWebView, since it isn't a popup at all.
+        //
+        // NOTE: this requires the app's exact URL (origin + path, no query/hash) to be
+        // added as an "Authorized redirect URI" on the OAuth Client ID in Google Cloud
+        // Console (APIs & Services > Credentials) - the popup flow doesn't need this,
+        // so it's easy to miss when only the popup flow was ever tested.
+        const redirectUri = window.location.origin + window.location.pathname;
+        const state = JSON.stringify({ returnSearch: window.location.search });
+        const params = new URLSearchParams({
+            client_id: clientId,
+            redirect_uri: redirectUri,
+            response_type: 'token',
+            scope: scopes,
+            include_granted_scopes: 'true',
+            prompt: 'select_account',
+            state
+        });
+        window.location.href = `https://accounts.google.com/o/oauth2/v2/auth?${params.toString()}`;
+    }
+
+    handleOAuthRedirectCallback() {
+        // Picks up the access_token (or error) Google appends to the URL fragment
+        // after redirectToGoogleSignIn() sends the browser there and back. Runs before
+        // initializeBackgroundAuth() so, on success, the token is already sitting in
+        // localStorage by the time that runs - no separate sign-in-success codepath
+        // needed here, it just piggybacks on the normal "already signed in" boot path.
+        if (!window.location.hash || window.location.hash.length < 2) return;
+
+        const hashParams = new URLSearchParams(window.location.hash.slice(1));
+        const accessToken = hashParams.get('access_token');
+        const expiresIn = hashParams.get('expires_in');
+        const error = hashParams.get('error');
+        const stateRaw = hashParams.get('state');
+
+        if (!accessToken && !error) return; // Unrelated hash - leave it alone
+
+        let returnSearch = '';
+        if (stateRaw) {
+            try {
+                const state = JSON.parse(stateRaw);
+                if (state && typeof state.returnSearch === 'string') returnSearch = state.returnSearch;
+            } catch (e) { /* ignore malformed state */ }
+        }
+        // Strip the token/error out of the address bar (never leave an access_token
+        // sitting in history) and restore whatever query string - e.g. a shared plan
+        // link's ?plan=&sheet= - was present on this tab before we redirected away
+        history.replaceState(null, '', window.location.pathname + returnSearch);
+
+        if (accessToken) {
+            const expiry = new Date(Date.now() + ((parseInt(expiresIn, 10) || 3600) - 120) * 1000);
+            localStorage.setItem('googleAccessToken', accessToken);
+            localStorage.setItem('googleTokenExpiry', expiry.toISOString());
+        } else if (error && error !== 'access_denied') {
+            console.error('Sign-in redirect error:', error);
+        }
+    }
+
     async requestAccessToken() {
         // Prevent multiple simultaneous token requests
         if (this.tokenRequestInProgress) {
@@ -316,17 +402,25 @@ class WorkoutTracker {
             return;
         }
 
+        const scopes = 'https://www.googleapis.com/auth/drive.file https://www.googleapis.com/auth/userinfo.email https://www.googleapis.com/auth/userinfo.profile';
+
+        if (this.isStandaloneDisplayMode()) {
+            // Popups don't work inside a standalone/installed PWA - redirect instead.
+            // This navigates the page away; sign-in resumes on the way back in
+            // init() -> handleOAuthRedirectCallback().
+            this.redirectToGoogleSignIn(clientId, scopes);
+            return;
+        }
+
         this.tokenRequestInProgress = true;
 
-        const scopes = 'https://www.googleapis.com/auth/drive.file https://www.googleapis.com/auth/userinfo.email https://www.googleapis.com/auth/userinfo.profile';
-        
         // Use Google Identity Services token client
         const tokenClient = google.accounts.oauth2.initTokenClient({
             client_id: clientId,
             scope: scopes,
             callback: (tokenResponse) => {
                 this.tokenRequestInProgress = false;
-                
+
                 if (tokenResponse.access_token) {
                     this.googleToken = tokenResponse.access_token;
                     // Store token with expiry (subtract 2 minutes for safety, less conservative)
@@ -334,7 +428,7 @@ class WorkoutTracker {
                     localStorage.setItem('googleAccessToken', this.googleToken);
                     localStorage.setItem('googleTokenExpiry', expiry.toISOString());
                     this.isSignedIn = true;
-                    
+
                     // Update header buttons
                     this.updateHeaderButtons();
                     
@@ -424,9 +518,18 @@ class WorkoutTracker {
                     return;
                 }
 
-                this.tokenRequestInProgress = true;
-
                 const scopes = 'https://www.googleapis.com/auth/drive.file https://www.googleapis.com/auth/userinfo.email https://www.googleapis.com/auth/userinfo.profile';
+
+                if (this.isStandaloneDisplayMode()) {
+                    // Popups don't work inside a standalone/installed PWA - redirect
+                    // instead. The page is about to navigate away, so this promise
+                    // intentionally never settles; sign-in resumes on the way back in
+                    // init() -> handleOAuthRedirectCallback().
+                    this.redirectToGoogleSignIn(clientId, scopes);
+                    return;
+                }
+
+                this.tokenRequestInProgress = true;
 
                 // Use Google Identity Services token client
                 const tokenClient = google.accounts.oauth2.initTokenClient({

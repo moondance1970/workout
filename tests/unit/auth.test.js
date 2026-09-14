@@ -233,4 +233,102 @@ describe('Authentication', () => {
       expect(trackerState.googleConfig?.CLIENT_ID).toBe('warmed-during-init');
     });
   });
+
+  describe('Standalone PWA sign-in (redirect fallback)', () => {
+    // Regression coverage: even with the synchronous client-ID fix above, GIS's
+    // popup flow calls window.open() under the hood, and window.open() from inside
+    // an installed/home-screen PWA's standalone WKWebView on iOS is a silent no-op -
+    // no popup, no error, nothing happens when the button is tapped. The fix detects
+    // standalone display mode and does a plain top-level OAuth redirect instead,
+    // which is just a page navigation and works fine there.
+
+    // Mirrors isStandaloneDisplayMode()
+    const isStandaloneDisplayMode = (nav, mm) => {
+      try {
+        if (nav.standalone === true) return true;
+        return !!(mm && mm('(display-mode: standalone)').matches);
+      } catch (e) {
+        return false;
+      }
+    };
+
+    it('should detect iOS home-screen standalone mode via navigator.standalone', () => {
+      expect(isStandaloneDisplayMode({ standalone: true }, null)).toBe(true);
+    });
+
+    it('should detect installed PWA standalone mode via matchMedia', () => {
+      const matchMedia = (query) => ({ matches: query === '(display-mode: standalone)' });
+      expect(isStandaloneDisplayMode({}, matchMedia)).toBe(true);
+    });
+
+    it('should treat a normal browser tab as non-standalone', () => {
+      const matchMedia = () => ({ matches: false });
+      expect(isStandaloneDisplayMode({ standalone: false }, matchMedia)).toBe(false);
+    });
+
+    it('should build a redirect URL carrying client id, scope, and return state', () => {
+      // Mirrors redirectToGoogleSignIn()
+      const buildRedirectUrl = (origin, pathname, search, clientId, scopes) => {
+        const redirectUri = origin + pathname;
+        const state = JSON.stringify({ returnSearch: search });
+        const params = new URLSearchParams({
+          client_id: clientId,
+          redirect_uri: redirectUri,
+          response_type: 'token',
+          scope: scopes,
+          include_granted_scopes: 'true',
+          prompt: 'select_account',
+          state
+        });
+        return `https://accounts.google.com/o/oauth2/v2/auth?${params.toString()}`;
+      };
+
+      const url = buildRedirectUrl(
+        'https://example.com', '/', '?plan=p1&sheet=s1',
+        'client-abc', 'drive.file email profile'
+      );
+
+      expect(url).toContain('client_id=client-abc');
+      expect(url).toContain('redirect_uri=https%3A%2F%2Fexample.com%2F');
+      expect(url).toContain('response_type=token');
+      expect(url).toContain(encodeURIComponent(JSON.stringify({ returnSearch: '?plan=p1&sheet=s1' })));
+    });
+
+    it('should parse the access token and restore the original query string from the redirect', () => {
+      // Mirrors handleOAuthRedirectCallback()
+      const parseRedirectHash = (hash) => {
+        const hashParams = new URLSearchParams(hash.slice(1));
+        const accessToken = hashParams.get('access_token');
+        const stateRaw = hashParams.get('state');
+        let returnSearch = '';
+        if (stateRaw) {
+          const state = JSON.parse(stateRaw);
+          if (state && typeof state.returnSearch === 'string') returnSearch = state.returnSearch;
+        }
+        return { accessToken, returnSearch };
+      };
+
+      const state = encodeURIComponent(JSON.stringify({ returnSearch: '?plan=p1&sheet=s1' }));
+      const hash = `#access_token=abc123&expires_in=3599&state=${state}`;
+
+      const result = parseRedirectHash(hash);
+
+      expect(result.accessToken).toBe('abc123');
+      expect(result.returnSearch).toBe('?plan=p1&sheet=s1');
+    });
+
+    it('should ignore a hash that is not an OAuth redirect', () => {
+      const parseRedirectHash = (hash) => {
+        if (!hash || hash.length < 2) return null;
+        const hashParams = new URLSearchParams(hash.slice(1));
+        const accessToken = hashParams.get('access_token');
+        const error = hashParams.get('error');
+        if (!accessToken && !error) return null;
+        return { accessToken, error };
+      };
+
+      expect(parseRedirectHash('#some-other-anchor')).toBeNull();
+      expect(parseRedirectHash('')).toBeNull();
+    });
+  });
 });
