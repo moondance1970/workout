@@ -91,8 +91,18 @@ class AuthManager {
                 return false;
             }
 
-            // Use Google Identity Services to refresh token silently
-            return new Promise((resolve) => {
+            // Use Google Identity Services to refresh token silently. This needs a
+            // popup, and browsers block popups that aren't a direct result of a user
+            // click - which this never is (it's triggered by a timer/page-load, not a
+            // tap). When blocked, Google Identity Services can fail to ever call back
+            // at all (see the "Failed to open popup window... Maybe blocked by the
+            // browser?" console warning), which used to leave this promise pending
+            // forever - and since refreshInProgress/refreshPromise only get cleared in
+            // refreshToken()'s `finally`, that permanently wedged every future refresh
+            // attempt too, and (via initializeBackgroundAuth awaiting this on startup)
+            // could hang the entire app on "Not Connected" forever. Race it against a
+            // timeout so a blocked/ignored popup can never hang the caller.
+            const silentRefresh = new Promise((resolve) => {
                 const tokenClient = google.accounts.oauth2.initTokenClient({
                     client_id: clientId,
                     scope: 'https://www.googleapis.com/auth/drive.file https://www.googleapis.com/auth/userinfo.email https://www.googleapis.com/auth/userinfo.profile',
@@ -102,11 +112,11 @@ class AuthManager {
                             const expiry = new Date(Date.now() + (tokenResponse.expires_in - 120) * 1000);
                             localStorage.setItem('googleAccessToken', tokenResponse.access_token);
                             localStorage.setItem('googleTokenExpiry', expiry.toISOString());
-                            
+
                             // Update tracker
                             tracker.googleToken = tokenResponse.access_token;
                             tracker.isSignedIn = true;
-                            
+
                             console.log('Token refreshed successfully');
                             resolve(true);
                         } else {
@@ -119,6 +129,12 @@ class AuthManager {
                 // Request token silently (no user interaction)
                 tokenClient.requestAccessToken({ prompt: '' });
             });
+
+            const timeout = new Promise((resolve) => {
+                setTimeout(() => resolve(false), 5000);
+            });
+
+            return await Promise.race([silentRefresh, timeout]);
         } catch (error) {
             console.error('Error refreshing token:', error);
             return false;
@@ -143,9 +159,21 @@ class AuthManager {
         const now = new Date();
 
         if (now >= expiryDate) {
-            // Token expired, try to refresh
-            console.log('Stored token expired, attempting refresh...');
-            return await this.refreshToken();
+            // Token already expired by the time the page loaded - this is the normal
+            // case any time the user comes back after the token's ~1hr lifetime. Don't
+            // attempt (or wait on) a silent popup-based refresh here: it has no user
+            // gesture behind it, so it's essentially guaranteed to be blocked by the
+            // browser, and previously this `await` on a refresh that could hang forever
+            // (see _performTokenRefresh()) meant the ENTIRE app got stuck showing "Not
+            // Connected" forever with no working Sign In button on every such load.
+            // Clear the stale token and report "not authenticated" immediately instead,
+            // so the app boots normally and the user can sign in via the button (which
+            // *does* have a real click behind it, so the popup - or redirect fallback -
+            // actually works).
+            console.log('Stored token expired - clearing it and starting signed out (use the Sign In button to reauthenticate)');
+            localStorage.removeItem('googleAccessToken');
+            localStorage.removeItem('googleTokenExpiry');
+            return false;
         }
 
         // Token is valid, set up the tracker

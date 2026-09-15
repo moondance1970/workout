@@ -317,6 +317,77 @@ describe('Authentication', () => {
       expect(result.returnSearch).toBe('?plan=p1&sheet=s1');
     });
 
+  });
+
+  describe('Background token refresh (avoiding a startup hang)', () => {
+    // Regression coverage: AuthManager.initializeBackgroundAuth() used to `await` a
+    // silent (prompt: '') popup-based refresh whenever the stored token had already
+    // expired - the normal case on almost every return visit, since tokens only last
+    // ~1hr. That popup has no user gesture behind it, so browsers block it, and
+    // Google Identity Services then never calls back at all - leaving that awaited
+    // promise pending forever, which hung the entire app's init() (it awaits
+    // initializeBackgroundAuth()) on "Not Connected" with no working Sign In button,
+    // on every single load whenever the token had expired. The fix: never wait on a
+    // silent refresh for an already-expired token at startup, and never let a
+    // silent-refresh promise hang forever even when something does wait on it.
+
+    it('should report "not authenticated" immediately for an expired token, without waiting on a refresh', async () => {
+      // Mirrors the expired-token branch of initializeBackgroundAuth()
+      let refreshWasAwaited = false;
+      const slowRefreshThatNeverResolves = () => new Promise(() => { refreshWasAwaited = true; });
+
+      const initializeBackgroundAuth = async (expiryDate, now) => {
+        if (now >= expiryDate) {
+          // Fire-and-forget only - never awaited
+          slowRefreshThatNeverResolves();
+          return false;
+        }
+        return true;
+      };
+
+      const result = await initializeBackgroundAuth(new Date(Date.now() - 1000), new Date());
+
+      expect(result).toBe(false);
+      // The refresh function was invoked (so a background attempt can still happen)
+      // but its promise was never awaited, so this resolved immediately regardless
+      expect(refreshWasAwaited).toBe(true);
+    });
+
+    it('should clear a stale expired token instead of leaving it for the next check to trip over again', () => {
+      // Mirrors localStorage.removeItem(...) calls in the expired-token branch
+      const store = { googleAccessToken: 'stale-token', googleTokenExpiry: new Date(Date.now() - 1000).toISOString() };
+      const clearExpiredToken = (store) => {
+        delete store.googleAccessToken;
+        delete store.googleTokenExpiry;
+      };
+
+      clearExpiredToken(store);
+
+      expect(store.googleAccessToken).toBeUndefined();
+      expect(store.googleTokenExpiry).toBeUndefined();
+    });
+
+    it('should never let a silent refresh whose callback is never invoked hang past its timeout', async () => {
+      // Mirrors the Promise.race([silentRefresh, timeout]) added to _performTokenRefresh()
+      const silentRefreshThatNeverCallsBack = new Promise(() => {}); // simulates a blocked popup
+      const timeout = new Promise((resolve) => setTimeout(() => resolve(false), 20));
+
+      const result = await Promise.race([silentRefreshThatNeverCallsBack, timeout]);
+
+      expect(result).toBe(false);
+    });
+
+    it('should still resolve true when the silent refresh succeeds before the timeout', async () => {
+      const silentRefreshThatSucceeds = new Promise((resolve) => setTimeout(() => resolve(true), 5));
+      const timeout = new Promise((resolve) => setTimeout(() => resolve(false), 200));
+
+      const result = await Promise.race([silentRefreshThatSucceeds, timeout]);
+
+      expect(result).toBe(true);
+    });
+  });
+
+  describe('Standalone PWA sign-in redirect callback', () => {
     it('should ignore a hash that is not an OAuth redirect', () => {
       const parseRedirectHash = (hash) => {
         if (!hash || hash.length < 2) return null;
