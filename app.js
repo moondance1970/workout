@@ -105,20 +105,41 @@ class WorkoutTracker {
         const urlParams = new URLSearchParams(window.location.search);
         const planParam = urlParams.get('plan');
         const creatorSheetId = urlParams.get('sheet');
-        
+
+        // A previous load may have recorded a pending import (see below) before the
+        // tab got reloaded/discarded and lost it from memory - on mobile, taking a
+        // screenshot to show someone (or just switching apps) backgrounds the tab, and
+        // Android in particular will often silently discard/reload a backgrounded tab
+        // under memory pressure. Pick that back up now, before deciding what to do
+        // below, regardless of whether this load's own URL still has the plan link.
+        if (!this.pendingPlanImport) {
+            const saved = this.loadPendingPlanImport();
+            if (saved) this.pendingPlanImport = saved;
+        }
+
         if (planParam && creatorSheetId && this.isSignedIn) {
+            this.clearPendingPlanImport();
             await this.importPlanFromLink(planParam, creatorSheetId);
         } else if (planParam && this.isSignedIn) {
             // Plan ID only - try to find in own plans
+            this.clearPendingPlanImport();
             const plan = this.workoutPlans.find(p => p.id === planParam);
             if (plan) {
                 this.activatePlan(plan.id);
             }
         } else if (planParam && !this.isSignedIn) {
             // Not signed in yet - remember this link and resume the import automatically
-            // once sign-in completes (see resumePendingPlanImportIfAny())
+            // once sign-in completes (see resumePendingPlanImportIfAny()). Persisted to
+            // localStorage, not just kept in memory, for the reason above.
             this.pendingPlanImport = { planId: planParam, creatorSheetId: creatorSheetId || null };
+            this.savePendingPlanImport(this.pendingPlanImport);
             alert('Please sign in with Google to import this workout plan. After signing in, a new workout sheet will be automatically created for you.');
+        } else if (!planParam && this.isSignedIn && this.pendingPlanImport) {
+            // No plan link in *this* load's URL, but we just recovered a pending import
+            // from an earlier load above, and we're already signed in (e.g. background
+            // auth found a still-valid token) - requestAccessToken() isn't going to run
+            // to trigger this itself in that case, so resume it directly here.
+            await this.resumePendingPlanImportIfAny();
         }
         
         // Load current plan index from localStorage
@@ -4885,6 +4906,7 @@ class WorkoutTracker {
         if (!this.pendingPlanImport) return;
         const { planId, creatorSheetId } = this.pendingPlanImport;
         this.pendingPlanImport = null;
+        this.clearPendingPlanImport();
 
         if (creatorSheetId) {
             await this.importPlanFromLink(planId, creatorSheetId);
@@ -4894,6 +4916,40 @@ class WorkoutTracker {
                 this.activatePlan(plan.id);
             }
         }
+    }
+
+    // Persist a shared-plan link that was opened before sign-in completed, so it
+    // survives a page reload (see the comment in init() for why that matters on
+    // mobile). Expires after 24h so a very stale, long-forgotten link can't suddenly
+    // resurrect itself and import unexpectedly much later.
+    savePendingPlanImport(pending) {
+        try {
+            localStorage.setItem('pendingPlanImport', JSON.stringify({ ...pending, savedAt: Date.now() }));
+        } catch (e) {
+            // localStorage unavailable/full - the in-memory value still covers the
+            // common case (no reload before sign-in), just not the mobile-reload one
+            console.warn('Could not persist pending plan import:', e);
+        }
+    }
+
+    loadPendingPlanImport() {
+        try {
+            const raw = localStorage.getItem('pendingPlanImport');
+            if (!raw) return null;
+            const saved = JSON.parse(raw);
+            const ageMs = Date.now() - (saved.savedAt || 0);
+            if (!saved.planId || ageMs > 24 * 60 * 60 * 1000) {
+                this.clearPendingPlanImport();
+                return null;
+            }
+            return { planId: saved.planId, creatorSheetId: saved.creatorSheetId || null };
+        } catch (e) {
+            return null;
+        }
+    }
+
+    clearPendingPlanImport() {
+        localStorage.removeItem('pendingPlanImport');
     }
 
     async importPlanFromLink(planId, creatorSheetId) {

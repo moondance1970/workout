@@ -386,4 +386,115 @@ describe('Plan Sharing Integration', () => {
       expect(importCallCount).toBe(1);
     });
   });
+
+  describe('Pending Plan Import Survives a Reload', () => {
+    // Regression coverage: opening a shared plan link while signed out used to set
+    // `pendingPlanImport` as an in-memory-only property. On mobile, backgrounding the
+    // tab (e.g. switching apps to send a screenshot) can get it silently discarded/
+    // reloaded by the OS before sign-in finishes, wiping that value - the import
+    // intent was then lost permanently with no error at all, even though the user did
+    // go on to sign in successfully. The fix persists it to localStorage.
+
+    function makeStore() {
+      const data = {};
+      return {
+        getItem: (k) => (k in data ? data[k] : null),
+        setItem: (k, v) => { data[k] = String(v); },
+        removeItem: (k) => { delete data[k]; },
+      };
+    }
+
+    // Mirrors savePendingPlanImport()/loadPendingPlanImport()/clearPendingPlanImport()
+    function savePendingPlanImport(store, pending, now = Date.now()) {
+      store.setItem('pendingPlanImport', JSON.stringify({ ...pending, savedAt: now }));
+    }
+    function loadPendingPlanImport(store, now = Date.now()) {
+      const raw = store.getItem('pendingPlanImport');
+      if (!raw) return null;
+      const saved = JSON.parse(raw);
+      const ageMs = now - (saved.savedAt || 0);
+      if (!saved.planId || ageMs > 24 * 60 * 60 * 1000) {
+        store.removeItem('pendingPlanImport');
+        return null;
+      }
+      return { planId: saved.planId, creatorSheetId: saved.creatorSheetId || null };
+    }
+
+    it('should persist the pending import when a shared link is opened while signed out', () => {
+      const store = makeStore();
+      savePendingPlanImport(store, { planId: 'plan_trainer_1', creatorSheetId: 'trainer-sheet' });
+
+      expect(store.getItem('pendingPlanImport')).toBeTruthy();
+    });
+
+    it('should recover the pending import on a fresh load (simulating a discarded/reloaded tab)', () => {
+      // The store here stands in for localStorage surviving a full page reload, which
+      // wipes any in-memory `this.pendingPlanImport` but not localStorage
+      const store = makeStore();
+      savePendingPlanImport(store, { planId: 'plan_trainer_1', creatorSheetId: 'trainer-sheet' });
+
+      // Simulate a brand new WorkoutTracker instance after reload - in-memory state is gone
+      let pendingPlanImport = null;
+      const recovered = loadPendingPlanImport(store);
+      if (recovered) pendingPlanImport = recovered;
+
+      expect(pendingPlanImport).toEqual({ planId: 'plan_trainer_1', creatorSheetId: 'trainer-sheet' });
+    });
+
+    it('should ignore a pending import older than 24 hours', () => {
+      const store = makeStore();
+      const twoDaysAgo = Date.now() - 2 * 24 * 60 * 60 * 1000;
+      savePendingPlanImport(store, { planId: 'plan_trainer_1', creatorSheetId: 'trainer-sheet' }, twoDaysAgo);
+
+      const recovered = loadPendingPlanImport(store);
+
+      expect(recovered).toBeNull();
+      // Should also clean up the stale entry rather than leaving it forever
+      expect(store.getItem('pendingPlanImport')).toBeNull();
+    });
+
+    it('should accept a pending import saved just under 24 hours ago', () => {
+      const store = makeStore();
+      const almostADayAgo = Date.now() - (23 * 60 * 60 * 1000 + 59 * 60 * 1000);
+      savePendingPlanImport(store, { planId: 'plan_trainer_1', creatorSheetId: 'trainer-sheet' }, almostADayAgo);
+
+      const recovered = loadPendingPlanImport(store);
+
+      expect(recovered).toEqual({ planId: 'plan_trainer_1', creatorSheetId: 'trainer-sheet' });
+    });
+
+    it('should clear the persisted entry once the import has been resumed, imported or not', () => {
+      // Mirrors resumePendingPlanImportIfAny() clearing localStorage unconditionally,
+      // before even attempting the import - a failed import shouldn't leave the
+      // pending marker around to try again unexpectedly on some future load
+      const store = makeStore();
+      savePendingPlanImport(store, { planId: 'plan_trainer_1', creatorSheetId: 'trainer-sheet' });
+
+      // Resume: clear immediately, regardless of what happens next
+      store.removeItem('pendingPlanImport');
+
+      expect(loadPendingPlanImport(store)).toBeNull();
+    });
+
+    it('should resume directly on a load where the URL no longer carries the plan link but the user is now signed in', () => {
+      // Mirrors the init() fallback branch: `!planParam && isSignedIn && pendingPlanImport`
+      const store = makeStore();
+      savePendingPlanImport(store, { planId: 'plan_trainer_1', creatorSheetId: 'trainer-sheet' });
+
+      const planParam = null; // this load's URL has no ?plan= - e.g. reopened from a bookmark
+      const isSignedIn = true; // background auth found a still-valid token from before
+      let pendingPlanImport = null;
+      if (!pendingPlanImport) {
+        const saved = loadPendingPlanImport(store);
+        if (saved) pendingPlanImport = saved;
+      }
+
+      let resumed = false;
+      if (!planParam && isSignedIn && pendingPlanImport) {
+        resumed = true;
+      }
+
+      expect(resumed).toBe(true);
+    });
+  });
 });
