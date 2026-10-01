@@ -121,11 +121,13 @@ class WorkoutTracker {
             this.clearPendingPlanImport();
             await this.importPlanFromLink(planParam, creatorSheetId);
         } else if (planParam && this.isSignedIn) {
-            // Plan ID only - try to find in own plans
+            // Plan ID only - try to find in own plans. Only activates it if nothing
+            // else is currently active (see activatePlanIfNoneActive()) - this branch
+            // runs on *every* visit via a bookmarked/reused link, not just the first.
             this.clearPendingPlanImport();
             const plan = this.workoutPlans.find(p => p.id === planParam);
             if (plan) {
-                this.activatePlan(plan.id);
+                this.activatePlanIfNoneActive(plan.id);
             }
         } else if (planParam && !this.isSignedIn) {
             // Not signed in yet - remember this link and resume the import automatically
@@ -4417,7 +4419,7 @@ class WorkoutTracker {
         if (planIndex >= 0) {
             // Clear completed exercises when activating a plan (fresh start)
             this.completedPlanExercises = [];
-            
+
             this.currentPlanIndex = planIndex;
             this.activePlanId = planId;
             localStorage.setItem('currentPlanIndex', planIndex.toString());
@@ -4427,6 +4429,17 @@ class WorkoutTracker {
             return true;
         }
         return false;
+    }
+
+    // Used when revisiting a plan link for a plan that's already been imported/owned
+    // before (as opposed to a brand new import) - e.g. someone reuses a shared
+    // WhatsApp link as their regular way into the app. Re-activating unconditionally
+    // on every single visit would silently override a manual switch to a different
+    // plan (undermining "my own plan + a trainer's plan" coexisting) - only step in
+    // if nothing is currently active, so an existing deliberate choice is left alone.
+    activatePlanIfNoneActive(planId) {
+        if (this.activePlanId) return false;
+        return this.activatePlan(planId);
     }
 
     clearActivePlan() {
@@ -4913,7 +4926,7 @@ class WorkoutTracker {
         } else {
             const plan = this.workoutPlans.find(p => p.id === planId);
             if (plan) {
-                this.activatePlan(plan.id);
+                this.activatePlanIfNoneActive(plan.id);
             }
         }
     }
@@ -4972,13 +4985,16 @@ class WorkoutTracker {
                     window.history.replaceState({}, document.title, window.location.pathname);
                     return;
                 } else if (existingPlan.status === 'imported') {
-                    // Already imported - directly activate our local copy rather than
-                    // importing a duplicate
+                    // Already imported - this runs on every revisit of the link (e.g.
+                    // it's bookmarked/reused as the regular way into the app), not just
+                    // once, so only activate our local copy if nothing else is already
+                    // active - otherwise a manual switch to a different plan would get
+                    // silently overridden on every single visit.
                     const importedPlan = this.workoutPlans.find(p =>
                         p.sourcePlanId === planId && p.sourceCreatorSheetId === creatorSheetId
                     );
                     if (importedPlan) {
-                        this.activatePlan(importedPlan.id);
+                        this.activatePlanIfNoneActive(importedPlan.id);
                     }
                     window.history.replaceState({}, document.title, window.location.pathname);
                     return;
@@ -5121,7 +5137,9 @@ class WorkoutTracker {
                             p.sourcePlanId === originalPlanId && p.sourceCreatorSheetId === creatorSheetId
                         );
                         if (existing) {
-                            this.activatePlan(existing.id);
+                            // Same reasoning as the other "already imported" branch -
+                            // don't override a manual switch to a different plan
+                            this.activatePlanIfNoneActive(existing.id);
                         }
                         document.body.removeChild(modal);
                         window.history.replaceState({}, document.title, window.location.pathname);

@@ -183,9 +183,57 @@ describe('Workout Plans', () => {
     it('should get current plan from active ID', () => {
       const activePlanId = 'plan-1';
       const currentPlan = samplePlans.find(p => p.id === activePlanId);
-      
+
       expect(currentPlan).toBeTruthy();
       expect(currentPlan.id).toBe(activePlanId);
+    });
+  });
+
+  describe('Revisiting an already-imported plan link does not override a manual switch', () => {
+    // Regression coverage: reopening a shared WhatsApp link (e.g. it's bookmarked, or
+    // just reused as the regular way into the app) used to unconditionally re-activate
+    // that plan on *every* visit, silently overriding a manual switch to a different
+    // plan - undermining "my own plan + a trainer's plan coexisting". Mirrors
+    // activatePlanIfNoneActive().
+    const activatePlanIfNoneActive = (state, planId) => {
+      if (state.activePlanId) return false;
+      state.activePlanId = planId;
+      return true;
+    };
+
+    it('should activate the plan on first visit when nothing else is active', () => {
+      const state = { activePlanId: null };
+      const activated = activatePlanIfNoneActive(state, 'plan-shared');
+
+      expect(activated).toBe(true);
+      expect(state.activePlanId).toBe('plan-shared');
+    });
+
+    it('should not override a manually-selected plan on a repeat visit', () => {
+      const state = { activePlanId: 'plan-own' }; // user manually switched to their own plan
+      const activated = activatePlanIfNoneActive(state, 'plan-shared');
+
+      expect(activated).toBe(false);
+      expect(state.activePlanId).toBe('plan-own'); // unchanged
+    });
+
+    it('should still re-activate it if the user had deactivated all plans', () => {
+      const state = { activePlanId: null }; // e.g. they cleared their active plan
+      const activated = activatePlanIfNoneActive(state, 'plan-shared');
+
+      expect(activated).toBe(true);
+      expect(state.activePlanId).toBe('plan-shared');
+    });
+
+    it('should always activate unconditionally on the actual first-time import (not a revisit)', () => {
+      // Mirrors doImportPlan() ending with a plain this.activatePlan() call, not the
+      // guarded version - a genuinely new import should always take effect immediately
+      const state = { activePlanId: 'plan-own' };
+      const activatePlan = (s, planId) => { s.activePlanId = planId; return true; };
+
+      activatePlan(state, 'plan-newly-imported');
+
+      expect(state.activePlanId).toBe('plan-newly-imported');
     });
   });
 
