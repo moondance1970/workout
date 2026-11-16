@@ -309,6 +309,15 @@ class WorkoutTracker {
             this.updateHeaderButtons();
         }
 
+        // If a session was still active when the app last closed (tab closed,
+        // backgrounded and discarded by the OS, etc.), restore that "in progress"
+        // state now that today's data is loaded - rather than silently reverting to
+        // showing "Start Session" again even though the session itself is still
+        // right there. Only meaningful once real session data has actually loaded.
+        if (this.isSignedIn || this.offlineModeEnabled) {
+            this.resumeActiveSessionIfAny();
+        }
+
         // Check for plan import from URL parameter
         const urlParams = new URLSearchParams(window.location.search);
         const planParam = urlParams.get('plan');
@@ -1676,6 +1685,9 @@ class WorkoutTracker {
         this.sheetId = null;
         this.userEmail = null;
         this.userName = null;
+        // Don't let a resumed "session in progress" cue survive a sign-out - that
+        // could otherwise resurface against a different account entirely
+        this.setSessionActive(false);
         localStorage.removeItem('googleAccessToken');
         localStorage.removeItem('googleTokenExpiry');
         localStorage.removeItem('sheetId');
@@ -9995,6 +10007,42 @@ class WorkoutTracker {
         }
     }
 
+    // sessionActive used to be in-memory only, so closing the app (or just having
+    // Android discard the backgrounded tab) mid-session reset it to false on reopen -
+    // the "Start Session" button reappeared even though the session (today's logged
+    // exercises) was still right there, forcing an unnecessary re-start. Persisting
+    // it alongside the date it applies to lets init() tell "a session is still
+    // genuinely in progress" apart from "that was yesterday, start fresh" - see
+    // resumeActiveSessionIfAny().
+    setSessionActive(active) {
+        this.sessionActive = active;
+        localStorage.setItem('sessionActive', active ? 'true' : 'false');
+        if (active) {
+            localStorage.setItem('sessionActiveDate', new Date().toISOString().split('T')[0]);
+        }
+    }
+
+    // Called once from init(), after sessions/exerciseList/workoutPlans are loaded
+    // (online or from the offline store) - restores the "session in progress" UI
+    // (End Session button, Save Exercise button, etc.) without re-running plan
+    // rotation, which should only happen when a session genuinely *starts*, not on
+    // every reload of one already in progress.
+    resumeActiveSessionIfAny() {
+        if (localStorage.getItem('sessionActive') !== 'true') return;
+
+        const today = new Date().toISOString().split('T')[0];
+        if (localStorage.getItem('sessionActiveDate') !== today) {
+            // Stale flag from a previous day (e.g. the session was never properly
+            // ended) - don't resurrect it as active now that it's a new day.
+            this.setSessionActive(false);
+            return;
+        }
+
+        const sessionBtn = document.getElementById('session-btn');
+        if (!sessionBtn) return;
+        this.finishStartingSession(sessionBtn, { rotatePlan: false });
+    }
+
     async startSession() {
         const sessionBtn = document.getElementById('session-btn');
         if (!sessionBtn) return;
@@ -10096,12 +10144,14 @@ class WorkoutTracker {
     // rotation, UI updates, and marking the session active. By the time this runs,
     // this.sessions/exerciseList/workoutPlans are already populated (from Sheets for
     // the online path, from the durable offline store for the offline path).
-    finishStartingSession(sessionBtn) {
+    finishStartingSession(sessionBtn, { rotatePlan = true } = {}) {
         // Reload current session (today's session)
         this.currentSession = this.getTodaySession();
 
-        // Plan rotation: if plans exist, rotate to next plan
-        if (this.workoutPlans.length > 0) {
+        // Plan rotation: if plans exist, rotate to next plan. Skipped when resuming
+        // an already-active session across a reload (resumeActiveSessionIfAny()) -
+        // that's not a new session starting, so the plan shouldn't advance again.
+        if (rotatePlan && this.workoutPlans.length > 0) {
             const nextPlan = this.getNextPlan();
             if (nextPlan) {
                 this.activatePlan(nextPlan.id);
@@ -10117,7 +10167,7 @@ class WorkoutTracker {
         // Don't auto-select exercise - let user choose manually
 
         // Mark session as active and update button
-        this.sessionActive = true;
+        this.setSessionActive(true);
 
         // Hide welcome message when session starts
         const welcomeMessage = document.getElementById('welcome-message');
@@ -10163,7 +10213,7 @@ class WorkoutTracker {
                 this.cacheManager.setOfflineData('sessions', this.sessions, { touchLocal: true, touchSynced: false });
                 this.cacheManager.setOfflineData('exercises', this.exerciseList, { touchLocal: true, touchSynced: false });
                 this.cacheManager.setOfflineData('plans', this.workoutPlans, { touchLocal: true, touchSynced: false });
-                this.sessionActive = false;
+                this.setSessionActive(false);
                 this.finishEndingSession(sessionBtn);
                 console.log('Session ended successfully (offline)');
                 return;
@@ -10174,7 +10224,7 @@ class WorkoutTracker {
                 sessionBtn.disabled = false;
                 this.updateSessionButton();
                 alert('Not connected to Google. Session ended locally.');
-                this.sessionActive = false;
+                this.setSessionActive(false);
                 this.updateSessionButton();
                 return;
             }
@@ -10186,7 +10236,7 @@ class WorkoutTracker {
             // Mark session as inactive BEFORE pulling fresh data - Google Sheets (drive)
             // becomes the source of truth again now that the session has ended, so these
             // reloads are allowed to overwrite local state with whatever is on the sheet.
-            this.sessionActive = false;
+            this.setSessionActive(false);
 
             // Reload exercise list and plans from the sheet to pick up anything that may
             // have changed elsewhere (e.g. another device) while the phone was authoritative

@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { setupGoogleAPIMocks } from '../mocks/google-apis.js';
 import { sampleSessions, emptySession } from '../fixtures/sessions.js';
-import { createMockSession, getTodayDate } from '../utils/test-helpers.js';
+import { createMockSession, getTodayDate, createMockLocalStorage } from '../utils/test-helpers.js';
 
 describe('Sessions', () => {
   let mockSheets;
@@ -150,6 +150,57 @@ describe('Sessions', () => {
       
       expect(sessions.find(s => s.date === targetDate)).toBeUndefined();
       expect(sessions.length).toBe(sampleSessions.length - 1);
+    });
+  });
+
+  describe('Resuming an active session across a reload', () => {
+    // Regression coverage: a real bug report - the user logged 2 exercises, closed
+    // the app mid-session, reopened it, and the "Start Session" button reappeared
+    // instead of resuming. Root cause: sessionActive was in-memory only (never
+    // persisted), so a fresh page load always reset it to false regardless of
+    // whether a session was genuinely still in progress. Mirrors
+    // setSessionActive()/resumeActiveSessionIfAny().
+
+    let localStorage;
+
+    beforeEach(() => {
+      localStorage = createMockLocalStorage();
+    });
+
+    const setSessionActive = (store, active, today) => {
+      store.setItem('sessionActive', active ? 'true' : 'false');
+      if (active) store.setItem('sessionActiveDate', today);
+    };
+
+    const shouldResume = (store, today) => {
+      if (store.getItem('sessionActive') !== 'true') return false;
+      return store.getItem('sessionActiveDate') === today;
+    };
+
+    it('should persist sessionActive when a session starts', () => {
+      setSessionActive(localStorage, true, '2026-11-16');
+      expect(localStorage.getItem('sessionActive')).toBe('true');
+      expect(localStorage.getItem('sessionActiveDate')).toBe('2026-11-16');
+    });
+
+    it('should resume on reload the same day a session was left active', () => {
+      setSessionActive(localStorage, true, '2026-11-16');
+      expect(shouldResume(localStorage, '2026-11-16')).toBe(true);
+    });
+
+    it('should NOT resume a stale active flag from a previous day', () => {
+      setSessionActive(localStorage, true, '2026-11-15'); // yesterday
+      expect(shouldResume(localStorage, '2026-11-16')).toBe(false); // today
+    });
+
+    it('should not resume once a session has been properly ended', () => {
+      setSessionActive(localStorage, true, '2026-11-16');
+      setSessionActive(localStorage, false, '2026-11-16');
+      expect(shouldResume(localStorage, '2026-11-16')).toBe(false);
+    });
+
+    it('should not resume when no session was ever started', () => {
+      expect(shouldResume(localStorage, '2026-11-16')).toBe(false);
     });
   });
 });

@@ -13,7 +13,7 @@
 // project to do this automatically - a forgotten bump means users keep getting an
 // old cached version of the app indefinitely, which is the single most common way a
 // service worker goes wrong. When in doubt, bump it.
-const CACHE_NAME = 'workout-tracker-shell-v2';
+const CACHE_NAME = 'workout-tracker-shell-v3';
 
 const SHELL_FILES = [
     '/',
