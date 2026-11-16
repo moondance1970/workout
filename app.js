@@ -1585,7 +1585,11 @@ class WorkoutTracker {
         const offlineModeToggle = document.getElementById('offline-mode-toggle');
         const hasConnectedBefore = !!(this.getStaticSheetId() || this.getSessionsSheetId());
         if (offlineModeWrapper) {
-            offlineModeWrapper.style.display = hasConnectedBefore ? 'flex' : 'none';
+            offlineModeWrapper.style.display = hasConnectedBefore ? 'inline-flex' : 'none';
+            // Highlights the whole switch (pill background + bold green label, see
+            // styles.css) when active, not just the small thumb sliding over - that
+            // alone wasn't a clear enough "am I on or off?" signal.
+            offlineModeWrapper.classList.toggle('offline-mode-active', this.offlineModeEnabled);
         }
         if (offlineModeToggle) {
             offlineModeToggle.checked = this.offlineModeEnabled;

@@ -810,6 +810,47 @@ input:checked + .slider:before {
 }
 
 /* ============================================
+   OFFLINE MODE TOGGLE
+   ============================================ */
+
+#offline-mode-wrapper {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--spacing-sm);
+    padding: 4px var(--spacing-sm);
+    border-radius: var(--radius-full);
+    border: 1.5px solid transparent;
+    transition: 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+#offline-mode-label {
+    font-size: var(--font-size-xs);
+    color: var(--text-secondary);
+    transition: 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* The switch track itself turns green once checked - not just the thumb sliding -
+   so the on/off state reads clearly at a glance, not just on close inspection. */
+#offline-mode-wrapper .theme-switch input:checked + .slider {
+    background-color: var(--accent-success);
+    border-color: var(--accent-success);
+}
+
+/* Toggled by updateHeaderButtons() alongside the checkbox's checked state (not
+   relying on a CSS-only :has() selector, to keep this working everywhere) - gives
+   the whole control a highlighted pill + bold green label so "Offline Mode: ON" is
+   unmistakable even at a glance, not just on close inspection of the small switch. */
+#offline-mode-wrapper.offline-mode-active {
+    background: color-mix(in srgb, var(--accent-success) 15%, transparent);
+    border-color: var(--accent-success);
+}
+
+#offline-mode-wrapper.offline-mode-active #offline-mode-label {
+    color: var(--accent-success);
+    font-weight: 600;
+}
+
+/* ============================================
    FOOTER
    ============================================ */
 

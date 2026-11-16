@@ -27,7 +27,7 @@ test.describe('Offline-mode toggle visibility', () => {
       window.workoutTracker.updateHeaderButtons();
       return getComputedStyle(document.getElementById('offline-mode-wrapper')).display;
     });
-    expect(display).toBe('flex');
+    expect(display).toBe('inline-flex');
   });
 });
 
@@ -81,6 +81,41 @@ test.describe('Toggling offline mode', () => {
     expect(result.persisted).toBe('true');
     expect(result.offlineSessions).toEqual([{ date: '2026-11-16', exercises: [] }]);
     expect(result.offlineExercises).toEqual([{ name: 'Squats', isAerobic: false }]);
+  });
+
+  test('should visibly highlight the toggle (checked + active class) when enabled, and clear it when disabled', async ({ page }) => {
+    // Regression coverage for "isn't clear if you are or not" - the switch must be
+    // unambiguous at a glance, not just technically checked under the hood.
+    await gotoAndWait(page);
+
+    const afterEnable = await page.evaluate(async () => {
+      window.workoutTracker.staticSheetId = 'fake-static-sheet';
+      await window.workoutTracker.enableOfflineMode();
+      const wrapper = document.getElementById('offline-mode-wrapper');
+      return {
+        checked: document.getElementById('offline-mode-toggle').checked,
+        hasActiveClass: wrapper.classList.contains('offline-mode-active')
+      };
+    });
+    expect(afterEnable.checked).toBe(true);
+    expect(afterEnable.hasActiveClass).toBe(true);
+
+    const afterDisable = await page.evaluate(async () => {
+      window.workoutTracker.getSessionsSheetId = () => null;
+      window.workoutTracker.getStaticSheetId = () => null; // no sheets to reconcile against
+      window.workoutTracker.initGoogleSheets = async () => {};
+      window.workoutTracker.isSignedIn = true;
+      window.workoutTracker.googleToken = 'fake-token';
+
+      await window.workoutTracker.disableOfflineMode();
+      const wrapper = document.getElementById('offline-mode-wrapper');
+      return {
+        checked: document.getElementById('offline-mode-toggle').checked,
+        hasActiveClass: wrapper.classList.contains('offline-mode-active')
+      };
+    });
+    expect(afterDisable.checked).toBe(false);
+    expect(afterDisable.hasActiveClass).toBe(false);
   });
 });
 
