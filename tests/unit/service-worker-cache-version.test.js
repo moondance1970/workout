@@ -21,7 +21,7 @@ const repoRoot = resolve(dirname(new URL(import.meta.url).pathname), '../..');
 
 // Recorded hash per CACHE_NAME, kept in sync by hand alongside service-worker.js.
 const KNOWN_SHELL_HASHES = {
-  'workout-tracker-shell-v3': '47cff044754f1b868a321b2f645e4e14659e0d19be315f68d6b09bd74ac599a8'
+  'workout-tracker-shell-v5': '84b5f00f5504e38e8adc99348991e04a1e424d2894dd486838eb85f0418d4b4f'
 };
 
 function readShellFilesFromServiceWorker() {

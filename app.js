@@ -309,15 +309,6 @@ class WorkoutTracker {
             this.updateHeaderButtons();
         }
 
-        // If a session was still active when the app last closed (tab closed,
-        // backgrounded and discarded by the OS, etc.), restore that "in progress"
-        // state now that today's data is loaded - rather than silently reverting to
-        // showing "Start Session" again even though the session itself is still
-        // right there. Only meaningful once real session data has actually loaded.
-        if (this.isSignedIn || this.offlineModeEnabled) {
-            this.resumeActiveSessionIfAny();
-        }
-
         // Check for plan import from URL parameter
         const urlParams = new URLSearchParams(window.location.search);
         const planParam = urlParams.get('plan');
@@ -369,7 +360,20 @@ class WorkoutTracker {
                 this.activePlanId = this.workoutPlans[this.currentPlanIndex].id;
             }
         }
-        
+
+        // If a session was still active when the app last closed (tab closed,
+        // backgrounded and discarded by the OS, etc.), restore that "in progress"
+        // state now that today's data *and* activePlanId above are both loaded -
+        // rather than silently reverting to showing "Start Session" again even
+        // though the session itself is still right there. Must run after
+        // activePlanId is restored, not before: the exercise dropdown's plan filter
+        // (filterExercisesByPlan(), used by updateExerciseList() inside this) only
+        // applies at all when activePlanId is set, so resuming any earlier left it
+        // showing the full unfiltered list instead of excluding already-logged ones.
+        if (this.isSignedIn || this.offlineModeEnabled) {
+            this.resumeActiveSessionIfAny();
+        }
+
         this.updateRepsInputs();
         this.setupTabs(); // Setup tabs first so they work immediately
         this.updateSessionButton(); // Initialize session button state
@@ -10157,6 +10161,15 @@ class WorkoutTracker {
                 this.activatePlan(nextPlan.id);
                 this.currentSession.currentPlanId = nextPlan.id;
             }
+        } else if (!rotatePlan) {
+            // Resuming, not starting fresh - activatePlan() is what normally resets/
+            // rebuilds completedPlanExercises (the list the exercise dropdown filters
+            // against), but it's deliberately not called here. Without this,
+            // completedPlanExercises stays at its empty constructor default after a
+            // reload, so exercises already logged this session - including the plan's
+            // own - would incorrectly show up in the dropdown again. Rebuild it from
+            // the session data that's actually just been reloaded instead.
+            this.completedPlanExercises = (this.currentSession.exercises || []).map(ex => ex.name);
         }
 
         // Update UI

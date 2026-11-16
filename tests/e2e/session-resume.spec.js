@@ -104,4 +104,49 @@ test.describe('Resuming an active session across a reload', () => {
     const activePlanId = await page.evaluate(() => window.workoutTracker.activePlanId);
     expect(activePlanId).toBe('plan_a'); // still Plan A, not rotated to Plan B
   });
+
+  test('should filter already-logged exercises out of the dropdown on resume, not show the full list', async ({ page }) => {
+    // Regression coverage: a follow-up real bug report on this same fix - the
+    // exercise dropdown still showed the full list (including exercises already
+    // logged this session) after resuming, because completedPlanExercises - which
+    // the dropdown's plan filter checks - is itself never persisted and is normally
+    // only rebuilt by activatePlan(), which resuming deliberately skips.
+    await gotoAndWait(page);
+
+    await page.evaluate(() => {
+      window.workoutTracker.staticSheetId = 'fake-static-sheet';
+      const today = new Date().toISOString().split('T')[0];
+      const plan = {
+        id: 'plan_a',
+        name: 'Plan A',
+        exerciseSlots: [
+          { slotNumber: 1, exerciseName: 'Squats' },
+          { slotNumber: 2, exerciseName: 'Lunges' }
+        ]
+      };
+      const exercises = [{ name: 'Squats', isAerobic: false }, { name: 'Lunges', isAerobic: false }];
+      // Squats was already logged this session - Lunges was not
+      const sessions = [{ date: today, exercises: [{ name: 'Squats', weights: [40], reps: [10], sets: 1 }] }];
+
+      window.cacheManager.setOfflineData('sessions', sessions, { touchLocal: true, touchSynced: true });
+      window.cacheManager.setOfflineData('exercises', exercises, { touchLocal: true, touchSynced: true });
+      window.cacheManager.setOfflineData('plans', [plan], { touchLocal: true, touchSynced: true });
+
+      localStorage.setItem('offlineModeEnabled', 'true');
+      localStorage.setItem('sessionActive', 'true');
+      localStorage.setItem('sessionActiveDate', today);
+      localStorage.setItem('currentPlanIndex', '0');
+    });
+
+    await page.reload();
+    await page.waitForFunction(() => !!window.workoutTracker, { timeout: 10000 });
+    await page.waitForTimeout(300);
+
+    const dropdownOptions = await page.evaluate(() =>
+      [...document.getElementById('exercise-name').options].map(o => o.value).filter(Boolean)
+    );
+
+    expect(dropdownOptions).not.toContain('Squats'); // already logged - shouldn't reappear
+    expect(dropdownOptions).toContain('Lunges'); // not yet done - should still be offered
+  });
 });
