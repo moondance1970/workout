@@ -129,14 +129,22 @@ class CacheManager {
         try {
             const keys = Object.keys(localStorage);
             const now = Date.now();
-            
+
             keys.forEach(key => {
                 if (key.startsWith(this.cachePrefix)) {
+                    // The durable offline store (see getOfflineKey()/setOfflineData()
+                    // below) deliberately has no `timestamp` field and no matching
+                    // `cacheExpiry` entry - it's meant to never expire. Without this
+                    // skip, this TTL sweep would treat every record in it as corrupted
+                    // (`!data.timestamp`) and silently delete it, wiping out offline
+                    // mode's whole reason for existing the next time this runs.
+                    if (key.includes('_offline_')) return;
+
                     try {
                         const data = JSON.parse(localStorage.getItem(key));
-                        
+
                         // Remove if expired or old version
-                        if (!data.timestamp || 
+                        if (!data.timestamp ||
                             data.version !== this.cacheVersion ||
                             (now - data.timestamp) > Math.max(...Object.values(this.cacheExpiry))) {
                             localStorage.removeItem(key);
@@ -149,6 +157,101 @@ class CacheManager {
             });
         } catch (error) {
             console.warn('Error clearing old cache:', error);
+        }
+    }
+
+    // --- Durable offline store ---
+    // A second, independent namespace from the TTL cache above (getCachedData/
+    // setCachedData): no expiry, ever, and it tracks sync metadata per dataset so the
+    // app can tell "did I change this locally since I last synced?" and "did the
+    // sheet change since I last synced?" once a connection comes back. The existing
+    // TTL cache can't be repurposed for this - several places (backgroundSync(),
+    // refreshCacheFromServer()) key their own "is this stale" logic off that 5-30
+    // minute expiry, and changing its semantics here would be a correctness risk to
+    // code unrelated to offline mode.
+    getOfflineKey(type) {
+        return `${this.cachePrefix}offline_${type}`;
+    }
+
+    // Returns { value, lastLocalModifiedAt, lastSyncedAt, version } or null. Never
+    // expires - unlike getCachedData(), there is no staleness check here at all.
+    getOfflineData(type) {
+        try {
+            const raw = localStorage.getItem(this.getOfflineKey(type));
+            if (!raw) return null;
+            return JSON.parse(raw);
+        } catch (error) {
+            console.warn('Error reading offline store:', error);
+            return null;
+        }
+    }
+
+    // touchLocal: this write represents a real local change (a user edit while
+    // offline, or simply a fresh pull from Sheets being recorded as the new local
+    // value). touchSynced: this write also counts as "now reconciled with remote" -
+    // true for a pull (the value just came from Sheets, so it matches by definition),
+    // false for a plain local edit, which should look dirty until it's actually
+    // pushed back.
+    // Builds the record for setOfflineData(). When this write marks local as dirty
+    // (touchLocal but not touchSynced), lastLocalModifiedAt is forced to be strictly
+    // later than the existing lastSyncedAt even if Date.now() ties with it (millisecond
+    // resolution makes that a real possibility right after an enable-offline-mode seed
+    // or any other back-to-back write) - otherwise reconcileOnReconnect()'s `>` dirty
+    // check would wrongly treat a genuinely-changed dataset as clean.
+    buildOfflineRecord(type, value, { touchLocal, touchSynced }) {
+        const existing = this.getOfflineData(type) || {};
+        const now = Date.now();
+        let lastLocalModifiedAt = touchLocal ? now : (existing.lastLocalModifiedAt ?? null);
+        const lastSyncedAt = touchSynced ? now : (existing.lastSyncedAt ?? null);
+        if (touchLocal && !touchSynced && lastSyncedAt != null && lastLocalModifiedAt <= lastSyncedAt) {
+            lastLocalModifiedAt = lastSyncedAt + 1;
+        }
+        return { value, version: this.cacheVersion, lastLocalModifiedAt, lastSyncedAt };
+    }
+
+    setOfflineData(type, value, { touchLocal = true, touchSynced = false } = {}) {
+        try {
+            const record = this.buildOfflineRecord(type, value, { touchLocal, touchSynced });
+            localStorage.setItem(this.getOfflineKey(type), JSON.stringify(record));
+            return true;
+        } catch (error) {
+            console.warn('Error writing offline store:', error);
+            if (error.name === 'QuotaExceededError') {
+                this.clearOldCache();
+                try {
+                    const record = this.buildOfflineRecord(type, value, { touchLocal, touchSynced });
+                    localStorage.setItem(this.getOfflineKey(type), JSON.stringify(record));
+                    return true;
+                } catch (retryError) {
+                    console.error('Offline store write failed even after cleanup:', retryError);
+                }
+            }
+            return false;
+        }
+    }
+
+    // Call right after a push (local -> remote) succeeds, when the value itself
+    // hasn't changed - just advances the "last reconciled with remote" checkpoint.
+    markOfflineSynced(type) {
+        try {
+            const existing = this.getOfflineData(type);
+            if (!existing) return;
+            existing.lastSyncedAt = Date.now();
+            localStorage.setItem(this.getOfflineKey(type), JSON.stringify(existing));
+        } catch (error) {
+            console.warn('Error marking offline data synced:', error);
+        }
+    }
+
+    // Explicit wipe of just the durable offline store (not the TTL cache, not auth).
+    // Deliberately not wired to sign-out - offline data is meant to survive that.
+    clearOfflineStore() {
+        try {
+            ['sessions', 'exercises', 'plans'].forEach(type => {
+                localStorage.removeItem(this.getOfflineKey(type));
+            });
+        } catch (error) {
+            console.warn('Error clearing offline store:', error);
         }
     }
 

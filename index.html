@@ -54,6 +54,13 @@
             <div style="margin-bottom: 15px;">
                 <div id="session-btn-container">
                     <button id="session-btn" style="width: auto; padding: 10px 20px; margin: 0; display: none;">New Session</button>
+                    <div id="offline-mode-wrapper" style="display: none; align-items: center; gap: 8px;" title="Work offline using only locally saved data - no sign-in needed">
+                        <label class="theme-switch">
+                            <input type="checkbox" id="offline-mode-toggle">
+                            <span class="slider"></span>
+                        </label>
+                        <span style="font-size: var(--font-size-xs); color: var(--text-secondary);">Offline Mode</span>
+                    </div>
                     <div id="google-signin-button-header"></div>
                 </div>
             </div>
@@ -327,5 +334,18 @@
     </div>
 
     <script type="module" src="app.js"></script>
+    <script>
+        // Registers the app-shell service worker (see service-worker.js) so the page
+        // itself can still open with zero connectivity, not just its data. Guarded
+        // and deferred past load so it can never delay first render; a browser
+        // without service worker support just skips this entirely.
+        if ('serviceWorker' in navigator) {
+            window.addEventListener('load', () => {
+                navigator.serviceWorker.register('/service-worker.js').catch((error) => {
+                    console.warn('Service worker registration failed:', error);
+                });
+            });
+        }
+    </script>
 </body>
 </html>

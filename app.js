@@ -42,6 +42,7 @@ class WorkoutTracker {
         this.manuallySelectedExercise = null; // Track manually selected exercise to preserve selection
         this.manuallySwitchingExercise = false; // Flag to prevent auto-starting timer when manually switching exercises
         this.pendingPlanImport = null; // {planId, creatorSheetId} - a shared-plan link opened before sign-in, resumed once signed in
+        this.offlineModeEnabled = localStorage.getItem('offlineModeEnabled') === 'true'; // Deliberate "work offline" switch, next to the login button
 
         // Initialize cache and auth managers
         this.cacheManager = new CacheManager();
@@ -54,6 +55,194 @@ class WorkoutTracker {
         // undefined, so background auth silently failed on every single page load even
         // with a valid stored token. The bootstrap code calls init() right after
         // assigning window.workoutTracker instead.
+    }
+
+    // True whenever the app should behave as offline - either the user deliberately
+    // flipped the offline-mode switch on, or the browser itself reports no
+    // connectivity right now (auto-fallback, so forgetting to flip the switch before
+    // losing signal doesn't just surface a connection error). Reuses
+    // CacheManager.isOnline (already reactively tracked via online/offline events)
+    // rather than polling navigator.onLine directly here.
+    //
+    // Deliberately NOT used for: the offline-mode toggle's own visual checked state
+    // (that reflects only the persisted, deliberate offlineModeEnabled choice - a
+    // network blip shouldn't make the switch appear to flip itself), its visibility
+    // condition (based on having connected at least once, not live connectivity), or
+    // reconcileOnReconnect() (which only ever runs from a deliberate switch-off, never
+    // automatically just because navigator.onLine flickered back to true).
+    isEffectivelyOffline() {
+        return this.offlineModeEnabled || !this.cacheManager.isOnline;
+    }
+
+    // Turns the offline-mode switch on. Refuses mid-session (per the user's explicit
+    // "don't make me log in mid-session" requirement - switching modes mid-session
+    // would force a login on the way back online) and seeds the durable store on
+    // first-ever use so there's a baseline to work from.
+    async enableOfflineMode() {
+        const toggle = document.getElementById('offline-mode-toggle');
+
+        if (this.sessionActive) {
+            if (toggle) toggle.checked = false;
+            alert('Please end your current session before switching to Offline Mode.');
+            return;
+        }
+
+        this.offlineModeEnabled = true;
+        localStorage.setItem('offlineModeEnabled', 'true');
+
+        // First-ever use: seed the durable store from whatever's already loaded in
+        // memory (from the TTL cache / the online session that was just active), so
+        // there's something to read on the next boot or session start.
+        if (!this.cacheManager.getOfflineData('sessions')) {
+            this.cacheManager.setOfflineData('sessions', this.sessions, { touchLocal: true, touchSynced: true });
+        }
+        if (!this.cacheManager.getOfflineData('exercises')) {
+            this.cacheManager.setOfflineData('exercises', this.exerciseList, { touchLocal: true, touchSynced: true });
+        }
+        if (!this.cacheManager.getOfflineData('plans')) {
+            this.cacheManager.setOfflineData('plans', this.workoutPlans, { touchLocal: true, touchSynced: true });
+        }
+
+        this.updateHeaderButtons();
+        this.updateSyncStatus();
+    }
+
+    // Turns the offline-mode switch off - this is the one deliberate action that
+    // triggers reconcileOnReconnect(). Never leaves offlineModeEnabled cleared while
+    // data might still be unreconciled: if sign-in is needed and gets cancelled, the
+    // switch reverts to ON rather than silently dropping into a half-reconnected state.
+    async disableOfflineMode() {
+        const toggle = document.getElementById('offline-mode-toggle');
+
+        if (!this.isSignedIn || !this.googleToken) {
+            const signedIn = await this.requestAccessTokenPromise();
+            if (!signedIn) {
+                if (toggle) toggle.checked = true;
+                alert('Sign-in is needed to reconnect and sync your offline changes. Still in Offline Mode.');
+                return;
+            }
+        }
+
+        if (toggle) toggle.disabled = true;
+        try {
+            await this.reconcileOnReconnect();
+        } catch (error) {
+            console.error('Error reconciling offline data:', error);
+            if (toggle) {
+                toggle.checked = true;
+                toggle.disabled = false;
+            }
+            alert('Could not sync your offline changes: ' + (error.message || 'Unknown error') + '\n\nStill in Offline Mode - your data is safe locally.');
+            return;
+        }
+
+        this.offlineModeEnabled = false;
+        localStorage.setItem('offlineModeEnabled', 'false');
+        if (toggle) toggle.disabled = false;
+
+        this.updateHeaderButtons();
+        this.updateSyncStatus();
+    }
+
+    // One Drive files.get call for a known file ID - same API this app already uses
+    // for name-based search (findSheetByName()), just by ID instead, to get a coarse
+    // "has this sheet changed since I last touched it" signal for reconcileOnReconnect().
+    async getSheetModifiedTime(fileId) {
+        await this.initGoogleDrive();
+        if (gapi.client) {
+            gapi.client.setToken({ access_token: this.googleToken });
+        }
+        const response = await gapi.client.drive.files.get({
+            fileId,
+            fields: 'modifiedTime'
+        });
+        return new Date(response.result.modifiedTime).getTime();
+    }
+
+    // Decides push/pull/no-op/newest-wins for one dataset, given its durable record
+    // and the remote sheet's modifiedTime. `push`/`pull` are async callbacks supplied
+    // by reconcileOnReconnect() per dataset.
+    async reconcileDataset(type, remoteModifiedAt, { push, pull }) {
+        const local = this.cacheManager.getOfflineData(type);
+        if (!local) return; // Offline mode was never actually used for this dataset
+
+        const lastSyncedAt = local.lastSyncedAt ?? 0;
+        const localDirty = (local.lastLocalModifiedAt ?? 0) > lastSyncedAt;
+        const remoteDirty = remoteModifiedAt > lastSyncedAt;
+
+        if (!localDirty && !remoteDirty) {
+            return; // Nothing changed on either side since the last sync
+        } else if (localDirty && !remoteDirty) {
+            await push();
+        } else if (!localDirty && remoteDirty) {
+            await pull();
+        } else {
+            // Genuine conflict - both sides changed since the last sync. Per the
+            // user's explicit choice: fully automatic newest-wins, no prompt,
+            // applied the same way for every dataset.
+            if ((local.lastLocalModifiedAt ?? 0) >= remoteModifiedAt) {
+                await push();
+            } else {
+                await pull();
+            }
+        }
+    }
+
+    // Runs once per dataset (sessions / exercises / plans) when the offline-mode
+    // switch is turned off. Exercises and plans share one sheet (staticSheetId), so
+    // its modifiedTime is fetched once and reused for both.
+    async reconcileOnReconnect() {
+        await this.initGoogleSheets();
+
+        const sessionsSheetId = this.getSessionsSheetId();
+        if (sessionsSheetId) {
+            const remoteModifiedAt = await this.getSheetModifiedTime(sessionsSheetId);
+            await this.reconcileDataset('sessions', remoteModifiedAt, {
+                push: async () => { await this.syncToSheet(true); },
+                pull: async () => {
+                    const pulled = await this.loadSessionsFromSheet();
+                    if (pulled) {
+                        this.sessions = pulled;
+                        this.cacheManager.setCachedData('sessions', pulled);
+                        this.cacheManager.setOfflineData('sessions', pulled, { touchLocal: true, touchSynced: true });
+                        this.currentSession = this.getTodaySession();
+                        this.renderTodayWorkout();
+                        this.renderHistory();
+                    }
+                }
+            });
+        }
+
+        const staticSheetId = this.getStaticSheetId();
+        if (staticSheetId) {
+            const remoteModifiedAt = await this.getSheetModifiedTime(staticSheetId);
+
+            await this.reconcileDataset('exercises', remoteModifiedAt, {
+                push: async () => { await this.syncExerciseListToSheet(); },
+                pull: async () => {
+                    const pulled = await this.loadExerciseListFromSheet();
+                    if (pulled) {
+                        this.exerciseList = pulled;
+                        this.cacheManager.setCachedData('exercises', pulled);
+                        this.cacheManager.setOfflineData('exercises', pulled, { touchLocal: true, touchSynced: true });
+                        this.updateExerciseList();
+                    }
+                }
+            });
+
+            await this.reconcileDataset('plans', remoteModifiedAt, {
+                push: async () => { await this.saveWorkoutPlans(); },
+                pull: async () => {
+                    const pulled = await this.loadWorkoutPlansFromSheet();
+                    if (pulled) {
+                        this.workoutPlans = pulled;
+                        this.cacheManager.setCachedData('plans', pulled);
+                        this.cacheManager.setOfflineData('plans', pulled, { touchLocal: true, touchSynced: true });
+                        this.updatePlanDropdown();
+                    }
+                }
+            });
+        }
     }
 
     async init() {
@@ -95,12 +284,31 @@ class WorkoutTracker {
             
             // Start background sync to refresh from server
             this.cacheManager.backgroundSync();
+        } else if (this.offlineModeEnabled) {
+            // Not authenticated, but offline mode was left on from a previous visit -
+            // boot straight from the durable local store instead of showing the
+            // "please sign in" UI. Mirrors the authenticated branch above, just
+            // sourced from loadAllDataFromOfflineStore() instead of the TTL cache.
+            this.isSignedIn = false;
+            this.dataLoaded = false;
+            this.updateSyncStatus();
+
+            this.loadAllDataFromOfflineStore();
+
+            this.updateHeaderButtons();
+            this.renderTodayWorkout();
+            this.renderHistory();
+            this.updateExerciseList(true);
+            this.updatePlanDropdown();
+
+            this.dataLoaded = true;
+            this.updateSyncStatus();
         } else {
             // Not authenticated - show login UI
             this.isSignedIn = false;
             this.updateHeaderButtons();
         }
-        
+
         // Check for plan import from URL parameter
         const urlParams = new URLSearchParams(window.location.search);
         const planParam = urlParams.get('plan');
@@ -1368,8 +1576,22 @@ class WorkoutTracker {
         
         const headerButtonContainer = document.getElementById('google-signin-button-header');
         const sessionBtn = document.getElementById('session-btn');
-        
-        if (!this.isSignedIn) {
+
+        // The offline-mode switch itself: hidden until the user has connected at
+        // least once ("connect initially once"), since before that there's no local
+        // data for it to mean anything - checked via the sheet IDs ever having
+        // resolved, not live connectivity.
+        const offlineModeWrapper = document.getElementById('offline-mode-wrapper');
+        const offlineModeToggle = document.getElementById('offline-mode-toggle');
+        const hasConnectedBefore = !!(this.getStaticSheetId() || this.getSessionsSheetId());
+        if (offlineModeWrapper) {
+            offlineModeWrapper.style.display = hasConnectedBefore ? 'flex' : 'none';
+        }
+        if (offlineModeToggle) {
+            offlineModeToggle.checked = this.offlineModeEnabled;
+        }
+
+        if (!this.isSignedIn && !this.offlineModeEnabled) {
             // Show login button in header, hide session button
             if (headerButtonContainer) {
                 headerButtonContainer.innerHTML = '';
@@ -1384,7 +1606,7 @@ class WorkoutTracker {
                 sessionBtn.style.display = 'none';
             }
         } else {
-            // Hide login button, show session button
+            // Hide login button, show session button (signed in OR offline mode)
             if (headerButtonContainer) {
                 headerButtonContainer.innerHTML = '';
             }
@@ -1408,8 +1630,8 @@ class WorkoutTracker {
             return;
         }
         
-        // Only show if signed in
-        if (!this.isSignedIn) {
+        // Only show if signed in (or working offline with local data to show)
+        if (!this.isSignedIn && !this.offlineModeEnabled) {
             planDropdown.style.display = 'none';
             if (startSessionBtn) startSessionBtn.style.display = 'none';
             return;
@@ -1510,6 +1732,31 @@ class WorkoutTracker {
             this.userEmail = cachedUserInfo.email;
             this.userName = cachedUserInfo.name;
             this.updateWelcomeMessage();
+        }
+    }
+
+    // Offline-mode counterpart to loadDataFromCache() above - reads from the durable
+    // offline store (cache-manager.js's getOfflineData(), which never expires) rather
+    // than the TTL cache, since offline mode needs to survive far longer than 5-30
+    // minutes. Used both at boot (when offline mode was left on from a previous visit
+    // and there's no live sign-in to fall back on) and by startSession()'s offline
+    // branch. Only overwrites in-memory data where a durable record actually exists,
+    // so it's safe to call even before offline mode has ever been used.
+    loadAllDataFromOfflineStore() {
+        const offlineSessions = this.cacheManager.getOfflineData('sessions');
+        if (offlineSessions) {
+            this.sessions = offlineSessions.value;
+            this.currentSession = this.getTodaySession();
+        }
+
+        const offlineExercises = this.cacheManager.getOfflineData('exercises');
+        if (offlineExercises) {
+            this.exerciseList = offlineExercises.value;
+        }
+
+        const offlinePlans = this.cacheManager.getOfflineData('plans');
+        if (offlinePlans) {
+            this.workoutPlans = offlinePlans.value;
         }
     }
 
@@ -1682,7 +1929,19 @@ class WorkoutTracker {
                 localStorage.setItem('theme', newTheme);
             });
         }
-        
+
+        // Offline-mode toggle
+        const offlineModeToggle = document.getElementById('offline-mode-toggle');
+        if (offlineModeToggle) {
+            offlineModeToggle.addEventListener('change', async (e) => {
+                if (e.target.checked) {
+                    await this.enableOfflineMode();
+                } else {
+                    await this.disableOfflineMode();
+                }
+            });
+        }
+
         // Plan dropdown change handler
         const planDropdown = document.getElementById('select-plan-dropdown');
         if (planDropdown) {
@@ -2279,6 +2538,7 @@ class WorkoutTracker {
         // Save updated exercise list
         if (updatedCount > 0) {
             this.cacheManager.setCachedData('exercises', this.exerciseList);
+            this.cacheManager.setOfflineData('exercises', this.exerciseList, { touchLocal: true, touchSynced: false });
             await this.saveExerciseList();
             this.updateExerciseList();
             this.renderExerciseConfigList();
@@ -3071,6 +3331,7 @@ class WorkoutTracker {
 
         // Update local cache immediately so the change is reflected right away
         this.cacheManager.setCachedData('exercises', this.exerciseList);
+        this.cacheManager.setOfflineData('exercises', this.exerciseList, { touchLocal: true, touchSynced: false });
 
         // Save to Google Sheets immediately
         await this.saveExerciseList();
@@ -3381,6 +3642,7 @@ class WorkoutTracker {
 
         // Update local cache immediately so the change is reflected right away
         this.cacheManager.setCachedData('exercises', this.exerciseList);
+        this.cacheManager.setOfflineData('exercises', this.exerciseList, { touchLocal: true, touchSynced: false });
 
         // Save to Google Sheets immediately
         await this.saveExerciseList();
@@ -3437,6 +3699,7 @@ class WorkoutTracker {
 
         // Update local cache immediately so the change is reflected right away
         this.cacheManager.setCachedData('exercises', this.exerciseList);
+        this.cacheManager.setOfflineData('exercises', this.exerciseList, { touchLocal: true, touchSynced: false });
 
         // Save to Google Sheets
         this.saveExerciseList();
@@ -3472,6 +3735,7 @@ class WorkoutTracker {
 
         // Update local cache immediately so the change is reflected right away
         this.cacheManager.setCachedData('exercises', this.exerciseList);
+        this.cacheManager.setOfflineData('exercises', this.exerciseList, { touchLocal: true, touchSynced: false });
 
         // Save to Google Sheets
         this.saveExerciseList();
@@ -4307,6 +4571,7 @@ class WorkoutTracker {
         
         // Update local cache immediately so the change is reflected right away
         this.cacheManager.setCachedData('plans', this.workoutPlans);
+        this.cacheManager.setOfflineData('plans', this.workoutPlans, { touchLocal: true, touchSynced: false });
 
         // Save to Google Sheets
         await this.saveWorkoutPlans();
@@ -4374,6 +4639,7 @@ class WorkoutTracker {
 
         // Update local cache immediately so the change is reflected right away
         this.cacheManager.setCachedData('plans', this.workoutPlans);
+        this.cacheManager.setOfflineData('plans', this.workoutPlans, { touchLocal: true, touchSynced: false });
 
         // Save to Google Sheets
         await this.saveWorkoutPlans();
@@ -5681,7 +5947,8 @@ class WorkoutTracker {
 
         // Save to cache first (immediate)
         this.cacheManager.setCachedData('sessions', this.sessions);
-        
+        this.cacheManager.setOfflineData('sessions', this.sessions, { touchLocal: true, touchSynced: false });
+
         // Save to localStorage for backward compatibility
         localStorage.setItem('workoutSessions', JSON.stringify(this.sessions));
 
@@ -5695,6 +5962,7 @@ class WorkoutTracker {
             });
             // Don't sort - keep in sheet order
             this.cacheManager.setCachedData('exercises', this.exerciseList);
+            this.cacheManager.setOfflineData('exercises', this.exerciseList, { touchLocal: true, touchSynced: false });
             this.saveExerciseList();
         }
 
@@ -7127,6 +7395,7 @@ class WorkoutTracker {
                     if (sheetExercises && !this.sessionActive) {
                         this.exerciseList = sheetExercises;
                         this.cacheManager.setCachedData('exercises', this.exerciseList);
+                        this.cacheManager.setOfflineData('exercises', this.exerciseList, { touchLocal: true, touchSynced: true });
                         // Update UI if data changed
                         this.updateExerciseList(true);
                     }
@@ -7146,6 +7415,7 @@ class WorkoutTracker {
                 const sheetExercises = await this.loadExerciseListFromSheet();
                 if (sheetExercises && sheetExercises.length > 0) {
                     this.cacheManager.setCachedData('exercises', sheetExercises);
+                    this.cacheManager.setOfflineData('exercises', sheetExercises, { touchLocal: true, touchSynced: true });
                     return sheetExercises;
                 }
                 return [];
@@ -7263,6 +7533,10 @@ class WorkoutTracker {
                     throw error;
                 }
             }
+
+            // Exercises successfully pushed - advance the offline-mode "last synced"
+            // checkpoint (only reached if neither write attempt above threw)
+            this.cacheManager.markOfflineSynced('exercises');
         } catch (error) {
             console.error('Error syncing exercise list to sheet:', error);
             // Don't throw - exercise list sync failure shouldn't break the main sync
@@ -7361,6 +7635,7 @@ class WorkoutTracker {
                     if (sheetPlans && !this.sessionActive) {
                         this.workoutPlans = sheetPlans;
                         this.cacheManager.setCachedData('plans', this.workoutPlans);
+                        this.cacheManager.setOfflineData('plans', this.workoutPlans, { touchLocal: true, touchSynced: true });
                         // Update UI if data changed
                         this.updatePlanDropdown();
                     }
@@ -7375,6 +7650,7 @@ class WorkoutTracker {
         const sheetPlans = await this.loadWorkoutPlansFromSheet();
         if (sheetPlans) {
             this.cacheManager.setCachedData('plans', sheetPlans);
+            this.cacheManager.setOfflineData('plans', sheetPlans, { touchLocal: true, touchSynced: true });
         }
         return sheetPlans;
     }
@@ -7509,6 +7785,9 @@ class WorkoutTracker {
                     throw error;
                 }
             }
+
+            // Plans successfully pushed - advance the offline-mode "last synced" checkpoint
+            this.cacheManager.markOfflineSynced('plans');
         } catch (error) {
             console.error('Error saving workout plans to sheet:', error);
         }
@@ -8345,6 +8624,10 @@ class WorkoutTracker {
                 valueInputOption: 'RAW',
                 resource: { values: rows }
             });
+
+            // Sessions successfully pushed - advance the offline-mode "last synced"
+            // checkpoint so reconcileOnReconnect() doesn't see this as still-dirty
+            this.cacheManager.markOfflineSynced('sessions');
 
             // Also sync exercise list
             await this.syncExerciseListToSheet();
@@ -9275,6 +9558,11 @@ class WorkoutTracker {
     }
     
     async refreshDataFromSheet() {
+        if (this.offlineModeEnabled) {
+            alert('You\'re in Offline Mode. Turn it off to reconnect and refresh from Google Sheets.');
+            return;
+        }
+
         if (!this.isSignedIn) {
             alert('Please sign in first');
             return;
@@ -9470,6 +9758,7 @@ class WorkoutTracker {
                     if (sheetSessions && !this.sessionActive) {
                         this.sessions = sheetSessions;
                         this.cacheManager.setCachedData('sessions', this.sessions);
+                        this.cacheManager.setOfflineData('sessions', this.sessions, { touchLocal: true, touchSynced: true });
                         // Update UI if data changed
                         this.renderTodayWorkout();
                         this.renderHistory();
@@ -9490,6 +9779,7 @@ class WorkoutTracker {
                 const sheetSessions = await this.loadSessionsFromSheet();
                 if (sheetSessions && sheetSessions.length > 0) {
                     this.cacheManager.setCachedData('sessions', sheetSessions);
+                    this.cacheManager.setOfflineData('sessions', sheetSessions, { touchLocal: true, touchSynced: true });
                     return sheetSessions;
                 }
                 return [];
@@ -9710,6 +10000,20 @@ class WorkoutTracker {
             sessionBtn.disabled = true;
             sessionBtn.textContent = 'Connecting...';
 
+            // Offline branch: load straight from the durable local store, with zero
+            // network calls of any kind - no sign-in prompt, no Sheets connection, no
+            // sync. isEffectivelyOffline() covers both the deliberate switch and the
+            // auto-fallback case (genuinely no connectivity right now even if the
+            // switch is off), so a session never gets stuck waiting on a login or a
+            // Sheets round-trip it has no way to complete.
+            if (this.isEffectivelyOffline()) {
+                sessionBtn.textContent = 'Starting (offline)...';
+                this.loadAllDataFromOfflineStore();
+                this.finishStartingSession(sessionBtn);
+                console.log('Session started successfully (offline)');
+                return;
+            }
+
             // Step 1: Ensure user is logged in to Google
             if (!this.isSignedIn || !this.googleToken) {
                 // Check if token exists but might be expired
@@ -9773,54 +10077,8 @@ class WorkoutTracker {
             
             // Reload exercise list from sheet to repopulate all exercises
             this.exerciseList = await this.loadExerciseList();
-            
-            // Reload current session (today's session)
-            this.currentSession = this.getTodaySession();
-            
-            // Plan rotation: if plans exist, rotate to next plan
-            if (this.workoutPlans.length > 0) {
-                const nextPlan = this.getNextPlan();
-                if (nextPlan) {
-                    this.activatePlan(nextPlan.id);
-                    this.currentSession.currentPlanId = nextPlan.id;
-                }
-            }
-            
-            // Update UI
-            this.renderTodayWorkout();
-            this.renderHistory();
-            this.updateExerciseList();
 
-            // Don't auto-select exercise - let user choose manually
-
-            // Step 5: Mark session as active and update button
-            this.sessionActive = true;
-            
-            // Hide welcome message when session starts
-            const welcomeMessage = document.getElementById('welcome-message');
-            if (welcomeMessage) {
-                welcomeMessage.style.display = 'none';
-            }
-            
-            sessionBtn.disabled = false;
-            this.updateSessionButton();
-            
-            // Show Save Exercise button
-            const saveWorkoutBtn = document.getElementById('save-workout');
-            if (saveWorkoutBtn) {
-                saveWorkoutBtn.style.display = 'inline-block';
-            }
-            
-            // Show Start Session button (it becomes End Session)
-            const startSessionBtn = document.getElementById('start-session-btn');
-            if (startSessionBtn) {
-                startSessionBtn.style.display = 'inline-block';
-                startSessionBtn.textContent = 'End Session';
-            }
-            
-            // Update sync status
-            this.updateSyncStatus();
-            
+            this.finishStartingSession(sessionBtn);
             console.log('Session started successfully');
         } catch (error) {
             console.error('Error starting session:', error);
@@ -9828,6 +10086,59 @@ class WorkoutTracker {
             this.updateSessionButton();
             alert('Error starting session: ' + (error.message || 'Unknown error'));
         }
+    }
+
+    // Shared tail for both the online and offline paths of startSession() - plan
+    // rotation, UI updates, and marking the session active. By the time this runs,
+    // this.sessions/exerciseList/workoutPlans are already populated (from Sheets for
+    // the online path, from the durable offline store for the offline path).
+    finishStartingSession(sessionBtn) {
+        // Reload current session (today's session)
+        this.currentSession = this.getTodaySession();
+
+        // Plan rotation: if plans exist, rotate to next plan
+        if (this.workoutPlans.length > 0) {
+            const nextPlan = this.getNextPlan();
+            if (nextPlan) {
+                this.activatePlan(nextPlan.id);
+                this.currentSession.currentPlanId = nextPlan.id;
+            }
+        }
+
+        // Update UI
+        this.renderTodayWorkout();
+        this.renderHistory();
+        this.updateExerciseList();
+
+        // Don't auto-select exercise - let user choose manually
+
+        // Mark session as active and update button
+        this.sessionActive = true;
+
+        // Hide welcome message when session starts
+        const welcomeMessage = document.getElementById('welcome-message');
+        if (welcomeMessage) {
+            welcomeMessage.style.display = 'none';
+        }
+
+        sessionBtn.disabled = false;
+        this.updateSessionButton();
+
+        // Show Save Exercise button
+        const saveWorkoutBtn = document.getElementById('save-workout');
+        if (saveWorkoutBtn) {
+            saveWorkoutBtn.style.display = 'inline-block';
+        }
+
+        // Show Start Session button (it becomes End Session)
+        const startSessionBtn = document.getElementById('start-session-btn');
+        if (startSessionBtn) {
+            startSessionBtn.style.display = 'inline-block';
+            startSessionBtn.textContent = 'End Session';
+        }
+
+        // Update sync status
+        this.updateSyncStatus();
     }
 
     async endSession() {
@@ -9838,6 +10149,21 @@ class WorkoutTracker {
             // Disable button during sync
             sessionBtn.disabled = true;
             sessionBtn.textContent = 'Syncing to Google...';
+
+            // Offline branch: write back to the durable local store only, with zero
+            // network calls - deliberately touchSynced:false, so the data looks dirty
+            // until a real reconnect (reconcileOnReconnect()) pushes it later. No
+            // re-pull of exercises/plans here - there's no Drive round-trip to be
+            // authoritative *from* until reconnect happens.
+            if (this.isEffectivelyOffline()) {
+                this.cacheManager.setOfflineData('sessions', this.sessions, { touchLocal: true, touchSynced: false });
+                this.cacheManager.setOfflineData('exercises', this.exerciseList, { touchLocal: true, touchSynced: false });
+                this.cacheManager.setOfflineData('plans', this.workoutPlans, { touchLocal: true, touchSynced: false });
+                this.sessionActive = false;
+                this.finishEndingSession(sessionBtn);
+                console.log('Session ended successfully (offline)');
+                return;
+            }
 
             // Ensure we're still signed in
             if (!this.isSignedIn || !this.googleToken || !this.sheetId) {
@@ -9865,27 +10191,7 @@ class WorkoutTracker {
             this.workoutPlans = await this.loadWorkoutPlans();
             this.updatePlanDropdown();
 
-            // Clear completed plan exercises when session ends (plan can be reused)
-            this.completedPlanExercises = [];
-            
-            sessionBtn.disabled = false;
-            this.updateSessionButton();
-            
-            // Hide Save Exercise button
-            const saveWorkoutBtn = document.getElementById('save-workout');
-            if (saveWorkoutBtn) {
-                saveWorkoutBtn.style.display = 'none';
-            }
-            
-            // Update Start Session button
-            const startSessionBtn = document.getElementById('start-session-btn');
-            if (startSessionBtn) {
-                startSessionBtn.textContent = 'Start Session';
-            }
-            
-            // Update sync status
-            this.updateSyncStatus();
-            
+            this.finishEndingSession(sessionBtn);
             console.log('Session ended successfully');
         } catch (error) {
             console.error('Error ending session:', error);
@@ -9893,6 +10199,30 @@ class WorkoutTracker {
             this.updateSessionButton();
             alert('Error syncing to Google: ' + (error.message || 'Unknown error') + '\n\nYour data is saved locally.');
         }
+    }
+
+    // Shared tail for both the online and offline paths of endSession().
+    finishEndingSession(sessionBtn) {
+        // Clear completed plan exercises when session ends (plan can be reused)
+        this.completedPlanExercises = [];
+
+        sessionBtn.disabled = false;
+        this.updateSessionButton();
+
+        // Hide Save Exercise button
+        const saveWorkoutBtn = document.getElementById('save-workout');
+        if (saveWorkoutBtn) {
+            saveWorkoutBtn.style.display = 'none';
+        }
+
+        // Update Start Session button
+        const startSessionBtn = document.getElementById('start-session-btn');
+        if (startSessionBtn) {
+            startSessionBtn.textContent = 'Start Session';
+        }
+
+        // Update sync status
+        this.updateSyncStatus();
     }
 
     updateSessionButton() {
